@@ -16,6 +16,7 @@
 #include "aim/Pid1Controller.hpp"
 #include "aim/PipelineDebug.hpp"
 #include "aim/PidTrace.hpp"
+#include "mouse/AimTracker.hpp"
 namespace ttbox::core::aim {
 class AimThread {
 public:
@@ -89,6 +90,11 @@ public:
             pid_trace_.close();
         }
     }
+
+    // 第15阶段：预测时域（秒；0=关闭预测，保持原行为）
+    void set_prediction_time(float seconds) {
+        prediction_time_s_ = seconds > 0.0f ? seconds : 0.0f;
+    }
     Status status() const;
 private:
     void loop();
@@ -106,6 +112,8 @@ private:
     AimStateMachine state_machine_;
     PipelineDebug pipeline_debug_;  // 第13阶段：链路诊断采样器（默认关闭）
     PidTrace pid_trace_;            // 第13阶段：PID 逐帧 Trace 采集（默认关闭）
+    AimTracker tracker_;            // 第15阶段：目标跟踪器（速度估计+预测）
+    float prediction_time_s_ = 0.0f;  // 第15阶段：预测时域（秒；0=关闭预测，保持原行为）
     uint64_t last_timestamp_us_ = 0;
     float remainder_x_ = 0.0f;
     float remainder_y_ = 0.0f;

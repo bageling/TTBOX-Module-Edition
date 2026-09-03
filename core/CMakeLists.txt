@@ -287,6 +287,11 @@ if(TTBOX_CORE_BUILD_TESTS)
   target_link_libraries(test_pipeline PRIVATE ttbox_core)
   add_test(NAME test_pipeline COMMAND test_pipeline)
 
+  # 第15阶段：AimTracker + PidController 运动场景测试（静止/匀速/加速/减速/急停/反转/切换/短暂丢失/完全丢失）
+  add_executable(test_tracker tests/test_tracker.cpp)
+  target_link_libraries(test_tracker PRIVATE ttbox_core)
+  add_test(NAME test_tracker COMMAND test_tracker)
+
   # 第13阶段：Pipeline 模块分项耗时基准（Selector/Coordinate/Controller，host+板端均可跑）
   add_executable(pipeline_bench tests/pipeline_bench.cpp)
   target_link_libraries(pipeline_bench PRIVATE ttbox_core)

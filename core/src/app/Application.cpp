@@ -144,6 +144,9 @@ bool Application::build_runtime_params(CoreRuntime::Params& out_params,
     // 第13阶段：PID Trace 采集（默认关闭；开启后逐帧写 CSV，只记录不改变行为）
     out_params.pid_trace_enabled = config_.get_bool("pid_trace_enabled", false);
     out_params.pid_trace_path = config_.get_string("pid_trace_path", "/tmp/pid_trace.csv");
+    // 第15阶段：目标预测时域（秒；0=关闭预测，保持原行为）
+    out_params.prediction_time_s =
+        static_cast<float>(config_.get_double("prediction_time_s", 0.0));
 
     const std::string output_kind = config_.get_string("output_backend", "aibox");
     bool enabled = config_.get_bool("output_enabled", false);

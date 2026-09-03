@@ -33,6 +33,7 @@ bool CoreRuntime::initialize(const Params& p, std::string* error) {
     pipeline_debug_interval_ = p.pipeline_debug_interval;
     pid_trace_enabled_ = p.pid_trace_enabled;
     pid_trace_path_ = p.pid_trace_path;
+    prediction_time_s_ = p.prediction_time_s;
     mailbox_ = std::make_unique<aim::AimTargetMailbox>(p.workers.worker_cores.size());
     capture_ = std::make_unique<V4L2Capture>();
     workers_ = std::make_unique<WorkerPool>();
@@ -85,6 +86,8 @@ bool CoreRuntime::start(std::string* error) {
     if (pid_trace_enabled_) {
         aim_thread_.set_pid_trace(true, pid_trace_path_);
     }
+    // 第15阶段：目标预测时域（config 控制；0=关闭预测，保持原行为）
+    aim_thread_.set_prediction_time(prediction_time_s_);
     // Phase2：启动低帧预览（失败仅告警，不影响 AI 流水线）
     {
         std::string perr;

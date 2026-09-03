@@ -93,6 +93,7 @@ void AimThread::loop() {
             event.now_ms = task.timestamp_us / 1000ULL;
             if (state_machine_.update(event, scfg.lost_grace_ms)) { controller_.reset(); pid_x_.reset(); pid_y_.reset(); remainder_x_=0.0f; remainder_y_=0.0f; last_target_id_=-1; }
             int16_t move_x = 0, move_y = 0; float ex = 0.0f, ey = 0.0f;
+            float pred_ex = 0.0f, pred_ey = 0.0f;  // 第15阶段：预测误差
             float tx = 0.0f, ty = 0.0f, ref_x = 0.0f, ref_y = 0.0f;
             float aibox_x = 0.0f, aibox_y = 0.0f, scaled_x = 0.0f, scaled_y = 0.0f;
             float trace_control_x = 0.0f, trace_control_y = 0.0f;
@@ -113,6 +114,17 @@ void AimThread::loop() {
                     tx = (selected.box.x1 + selected.box.x2) * 0.5f;
                     ty = selected.box.y1 + (selected.box.y2 - selected.box.y1) * 0.15f;
                 }
+                // 第15阶段：目标跟踪器（速度估计 + 预测）。
+                // 目标切换（target_id 变化）→ tracker 内部 Reset（速度清零）。
+                // prediction_time_s_>0 时用预测点做控制误差；=0 保持原行为（直接用瞄准点）。
+                if (tracker_.target_switched(selected.target_id)) {
+                    tracker_.reset();
+                }
+                tracker_.update(tx, ty, selected.target_id, task.timestamp_us);
+                float pred_tx = tx, pred_ty = ty;
+                if (prediction_time_s_ > 0.0f) {
+                    tracker_.predict(prediction_time_s_, &pred_tx, &pred_ty);
+                }
                 if (last_target_id_ != -1 && selected.target_id != last_target_id_) {
                     // 目标切换：速度/加速度来自旧目标，必须清除预测状态。
                     pid_x_.reset(); pid_y_.reset(); controller_.reset(); remainder_x_ = remainder_y_ = 0.0f;
@@ -123,10 +135,13 @@ void AimThread::loop() {
                 CoordinateTransform::reference_point(static_cast<float>(task.frame_width),
                                                      static_cast<float>(task.frame_height),
                                                      aim_point, &ref_x, &ref_y);
+                // 第15阶段：原始误差用瞄准点，控制误差用预测点（若启用）。
                 ex = tx - ref_x;
                 ey = ty - ref_y;
-                float control_x = ex;
-                float control_y = ey;
+                pred_ex = pred_tx - ref_x;
+                pred_ey = pred_ty - ref_y;
+                float control_x = (prediction_time_s_ > 0.0f) ? pred_ex : ex;
+                float control_y = (prediction_time_s_ > 0.0f) ? pred_ey : ey;
                 if (runtime_config_) {
                     auto profile = runtime_config_->snapshot();
                     if (profile) {
@@ -229,8 +244,20 @@ void AimThread::loop() {
                 e.reference_y = selected.valid ? ref_y : 0.0f;
                 e.error_x = ex;
                 e.error_y = ey;
+                // 第15阶段：预测点/预测误差（AimTracker 输出；未启用预测时=瞄准点/原始误差）
+                e.predicted_x = selected.valid ? (prediction_time_s_ > 0.0f ? pred_ex + ref_x : tx) : 0.0f;
+                e.predicted_y = selected.valid ? (prediction_time_s_ > 0.0f ? pred_ey + ref_y : ty) : 0.0f;
+                e.pred_error_x = selected.valid ? pred_ex : 0.0f;
+                e.pred_error_y = selected.valid ? pred_ey : 0.0f;
                 e.controller_raw_x = selected.valid ? aibox_x : 0.0f;
                 e.controller_raw_y = selected.valid ? aibox_y : 0.0f;
+                // 第15阶段：输出链中间值（死区前原始缩放输出 / 死区后 / 余数）
+                e.deadzone_out_x = selected.valid ? scaled_x : 0.0f;
+                e.deadzone_out_y = selected.valid ? scaled_y : 0.0f;
+                e.rate_limited_x = selected.valid ? scaled_x : 0.0f;
+                e.rate_limited_y = selected.valid ? scaled_y : 0.0f;
+                e.remainder_x = remainder_x_;
+                e.remainder_y = remainder_y_;
                 e.final_command_x = move_x;
                 e.final_command_y = move_y;
                 e.target_switch = (selected.valid && target_id_before != -1 &&
