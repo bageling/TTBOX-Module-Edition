@@ -78,6 +78,8 @@ set(CORE_SOURCES
   src/mouse/MouseRouter.cpp
   src/mouse/AimStateMachine.cpp
   src/mouse/PersonalMotion.cpp
+  # 第13阶段：控制器（IController 实现：封装 Pid1Controller + 输出链）
+  src/controller/PidController.cpp
 )
 if(TTBOX_CORE_BUILD_AUTH)
   list(APPEND CORE_SOURCES
@@ -279,6 +281,15 @@ if(TTBOX_CORE_BUILD_TESTS)
   add_executable(test_coordinate_transform tests/test_coordinate_transform.cpp)
   target_link_libraries(test_coordinate_transform PRIVATE ttbox_core)
   add_test(NAME test_coordinate_transform COMMAND test_coordinate_transform)
+
+  # 第13阶段：完整 Pipeline 单元测试（无检测/单/多/越界/NaN/低置信度/坐标/Controller/连续帧/消失）
+  add_executable(test_pipeline tests/test_pipeline.cpp)
+  target_link_libraries(test_pipeline PRIVATE ttbox_core)
+  add_test(NAME test_pipeline COMMAND test_pipeline)
+
+  # 第13阶段：Pipeline 模块分项耗时基准（Selector/Coordinate/Controller，host+板端均可跑）
+  add_executable(pipeline_bench tests/pipeline_bench.cpp)
+  target_link_libraries(pipeline_bench PRIVATE ttbox_core)
 
   # OutputBackend 统一接口测试（纯 C++，host 可测；Gate/选择/生命周期/零移动）
   add_executable(test_output_backend tests/test_output_backend.cpp)

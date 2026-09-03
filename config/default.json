@@ -51,12 +51,30 @@
   "model_uploaded": false,
   "runtime_profile": {
     "model_id": "",
-    "capture": { "width": 0, "height": 0, "offset_x": 0, "offset_y": 0 },
-    "inference": { "confidence": 0, "iou": 0, "class_filter": [], "max_detections": 0 },
-    "fov": { "enabled": false, "shape": 0, "radius": 0.5, "center_x": 0.5, "center_y": 0.5 }
+    "capture": {
+      "width": 0,
+      "height": 0,
+      "offset_x": 0,
+      "offset_y": 0
+    },
+    "inference": {
+      "confidence": 0,
+      "iou": 0,
+      "class_filter": [],
+      "max_detections": 0
+    },
+    "fov": {
+      "enabled": false,
+      "shape": 0,
+      "radius": 0.5,
+      "center_x": 0.5,
+      "center_y": 0.5
+    }
   },
   "model_registry_root": "",
   "output_backend": "usb_proxy",
   "output_proxy_socket": "/run/orangepi-mouse-passthrough/cmd.sock",
-  "output_enabled": false
+  "output_enabled": false,
+  "pipeline_debug_enabled": false,
+  "pipeline_debug_interval": 60
 }

@@ -1,5 +1,6 @@
 // AimThread.cpp — 独立瞄准线程最小可验证实现。
 #include "aim/AimThread.hpp"
+#include "aim/PipelineDebug.hpp"
 #include <chrono>
 #include <utility>
 #include "aim/AimError.hpp"
@@ -188,6 +189,33 @@ void AimThread::loop() {
                 move_y = 0;
             }
             output_->send(output::OutputAction{move_x, move_y, 0, 0, task.frame_number, task.timestamp_us});
+            // ---- 第13阶段：链路诊断采样（默认关闭；开启后每 N 帧输出一次完整链路）----
+            {
+                PipelineDebug::Snapshot ds;
+                ds.frame_number = task.frame_number;
+                ds.frame_w = task.frame_width;
+                ds.frame_h = task.frame_height;
+                ds.detections = task.detections.size();
+                ds.target.valid = selected.valid;
+                ds.target.class_id = selected.valid ? selected.box.class_id : 0;
+                ds.target.confidence = selected.valid ? selected.box.score : 0.0f;
+                ds.target.box = selected.valid ? selected.box : DetectionBox{};
+                ds.target.center_x = selected.valid ? (selected.box.x1 + selected.box.x2) * 0.5f : 0.0f;
+                ds.target.center_y = selected.valid ? (selected.box.y1 + selected.box.y2) * 0.5f : 0.0f;
+                ds.target.target_id = selected.valid ? selected.target_id : -1;
+                ds.point.valid = selected.valid;
+                ds.point.x = tx;
+                ds.point.y = ty;
+                ds.error_x = ex;
+                ds.error_y = ey;
+                ds.command.dx = move_x;
+                ds.command.dy = move_y;
+                ds.command.valid = true;
+                ds.command.frame_number = task.frame_number;
+                ds.command.timestamp_us = task.timestamp_us;
+                ds.mouse_disabled = !injection_allowed;  // 本阶段恒 true（禁止注入）
+                pipeline_debug_.sample(ds);
+            }
             last_timestamp_us_ = task.timestamp_us;
             std::lock_guard<std::mutex> lk(status_mutex_);
             status_.has_task = true;

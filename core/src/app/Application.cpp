@@ -136,6 +136,11 @@ bool Application::build_runtime_params(CoreRuntime::Params& out_params,
         parse_color_order(config_.get_string("model_color_order", "bgr"));
     out_params.workers.pass_through =
         config_.get_bool("model_pass_through", true);
+    // 第13阶段：链路诊断开关（默认关闭；开启后每 N 帧输出一次完整链路）
+    out_params.pipeline_debug_enabled =
+        config_.get_bool("pipeline_debug_enabled", false);
+    out_params.pipeline_debug_interval =
+        static_cast<uint32_t>(config_.get_int("pipeline_debug_interval", 60));
 
     const std::string output_kind = config_.get_string("output_backend", "aibox");
     bool enabled = config_.get_bool("output_enabled", false);

@@ -29,6 +29,8 @@ bool CoreRuntime::initialize(const Params& p, std::string* error) {
     output_ = p.output;
     worker_params_ = p.workers;
     preview_params_ = p.preview;
+    pipeline_debug_enabled_ = p.pipeline_debug_enabled;
+    pipeline_debug_interval_ = p.pipeline_debug_interval;
     mailbox_ = std::make_unique<aim::AimTargetMailbox>(p.workers.worker_cores.size());
     capture_ = std::make_unique<V4L2Capture>();
     workers_ = std::make_unique<WorkerPool>();
@@ -75,6 +77,8 @@ bool CoreRuntime::start(std::string* error) {
         running_ = false;
         return false;
     }
+    // 第13阶段：链路诊断开关（config 控制，默认关闭；不影响实时链路）
+    aim_thread_.set_pipeline_debug(pipeline_debug_enabled_, pipeline_debug_interval_);
     // Phase2：启动低帧预览（失败仅告警，不影响 AI 流水线）
     {
         std::string perr;

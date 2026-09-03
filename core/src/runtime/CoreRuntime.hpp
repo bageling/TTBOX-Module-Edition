@@ -29,6 +29,9 @@ public:
         PreviewModule::Params preview;
         std::shared_ptr<output::IHidOutput> output;
         RuntimeConfig* runtime_config = nullptr;
+        // 第13阶段：链路诊断（config 控制；默认关闭）
+        bool pipeline_debug_enabled = false;
+        uint32_t pipeline_debug_interval = 60;
     };
     bool initialize(const Params& params, std::string* error=nullptr);
     bool start(std::string* error=nullptr); void stop(); bool running() const { return running_.load(); }
@@ -48,6 +51,8 @@ private:
     RuntimeConfig* runtime_config_ = nullptr;
     WorkerPool::Params worker_params_{};
     PreviewModule::Params preview_params_{};
+    bool pipeline_debug_enabled_ = false;      // 第13阶段：链路诊断
+    uint32_t pipeline_debug_interval_ = 60;
     aim::AimThread aim_thread_;
     input::PhysicalMouseReader mouse_reader_;
     std::shared_ptr<output::IHidOutput> output_;

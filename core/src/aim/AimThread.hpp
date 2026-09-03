@@ -13,6 +13,7 @@
 #include "mouse/TargetSelector.hpp"
 #include "model/RuntimeProfile.hpp"
 #include "aim/Pid1Controller.hpp"
+#include "aim/PipelineDebug.hpp"
 namespace ttbox::core::aim {
 class AimThread {
 public:
@@ -67,6 +68,12 @@ public:
     ~AimThread() { stop(); }
     bool start(AimTargetMailbox* mailbox, std::shared_ptr<output::IHidOutput> output, int interval_us = 4000, RuntimeConfig* runtime_config = nullptr, std::atomic<uint16_t>* physical_buttons = nullptr);
     void stop();
+
+    // 第13阶段：链路诊断开关（config 控制；默认关闭，不影响实时链路）
+    void set_pipeline_debug(bool enabled, uint32_t sample_interval = 60) {
+        pipeline_debug_.enabled = enabled;
+        pipeline_debug_.sample_interval = sample_interval > 0 ? sample_interval : 60;
+    }
     Status status() const;
 private:
     void loop();
@@ -82,6 +89,7 @@ private:
     Pid1Controller pid_x_;   // pid1.cpp P_PID 1:1 移植：X 轴（predict=3.0）
     Pid1Controller pid_y_;   // pid1.cpp P_PID 1:1 移植：Y 轴（predict=0.0）
     AimStateMachine state_machine_;
+    PipelineDebug pipeline_debug_;  // 第13阶段：链路诊断采样器（默认关闭）
     uint64_t last_timestamp_us_ = 0;
     float remainder_x_ = 0.0f;
     float remainder_y_ = 0.0f;
