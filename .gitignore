@@ -1,0 +1,82 @@
+# ============================================================
+# TTBOX-Module-Edition .gitignore
+# 规则：构建产物/缓存/临时文件/敏感信息 一律不入库
+# ============================================================
+
+# ---------- 构建产物 ----------
+core/build*/
+core/cmake-build*/
+**/CMakeFiles/
+**/CMakeCache.txt
+**/Makefile
+**/cmake_install.cmake
+*.o
+*.a
+*.so
+*.d
+*.exe
+*.lib
+*.obj
+*.pdb
+*.ilk
+
+# ---------- Python 缓存 ----------
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+.venv/
+venv/
+
+# ---------- 日志与运行时 ----------
+*.log
+*.tmp
+/run/
+/tmp/
+core/dump/
+core/core.*
+
+# ---------- 大体积测试素材（不入库） ----------
+# 原始视频帧 / 大 raw 二进制
+*.raw
+*.h264
+*.yuv
+# 大模型文件（.pt / .onnx / 大 .rknn）
+*.pt
+*.pth
+*.onnx
+*.rknn
+# 临时 jpg 预览
+hdmi_preview_live2.jpg
+
+# ---------- 备份与临时 ----------
+*.bak
+*.bak-*
+*~
+*.orig
+*.rej
+*.swp
+
+# ---------- 敏感信息 ----------
+# 私钥 / 凭据 / 本地配置
+keys/*private*.pem
+**/*private*.pem
+*.key
+*.pem
+.env
+.env.*
+*.local.json
+*_credentials*
+config/*secret*
+config/*credential*
+
+# ---------- 系统文件 ----------
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# ---------- IDE ----------
+.vscode/
+.idea/
+*.suo

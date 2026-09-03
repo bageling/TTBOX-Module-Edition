@@ -1,0 +1,165 @@
+// WorkerPool.hpp — 多 Worker 并发 RKNN 推理（阶段 A-5）
+//
+// 目标：验证多个独立 RKNN context（各自绑定 NPU core）能否并行利用
+//       RK3588 三个 NPU Core，提升 640×640 FP16 模型整体吞吐。
+//
+// 设计：
+//   - InferenceWorker：独立线程 + 独立 RKNNEngine context + 独立 RgaProcessor + FP16 buffer
+//   - 共享 LatestFrame（capture 提供）：无队列、旧帧覆盖；worker 按 seq % N 认领帧
+//     （无重复处理、无延迟累积；帧只被一个 worker 消费）
+//   - core_mask：单 worker 用 config 值（0=auto）；多 worker 由调用方指定每核绑定（如 {1,2,4}）
+//   - 生命周期 RAII：stop() join 线程 → engine.destroy() → rga.destroy()；析构兜底
+//   - 并发安全：worker 间无共享可变状态（仅共享只读 LatestFrame.get()，有锁）；
+//     帧在 RGA/RKNN 使用期间由 shared_ptr 保活（V4L2 buffer 不提前归还）
+//
+// 边界：本模块只做"取帧 → RGA → FP16 → RKNN"，不含 Decode/Aim/HID（A-6+）。
+#pragma once
+
+#include <atomic>
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <thread>
+#include <vector>
+
+#include "common/Stats.hpp"
+#include "capture/V4L2Capture.hpp"
+#include "model/Decoder.hpp"
+#include "model/ModelAdapter.hpp"
+#include "model/RuntimeProfile.hpp"
+#include "pipeline/AimTargetMailbox.hpp"
+#include "rga/RgaProcessor.hpp"
+#include "rknn/DecodeNMS.hpp"
+#include "rknn/RKNNEngine.hpp"
+#include "rknn/DetectionGeometryFilter.hpp"
+#include "rknn/Preprocess.hpp"
+#include "rknn/Detector.hpp"
+
+namespace ttbox::core {
+
+// Decode/NMS 阶段统计（A-6）
+struct DecodeStageStats {
+    StatsCollector decode;   // 候选解码（原始输出→过滤）
+    StatsCollector nms;      // NMS
+    StatsCollector total;    // decode+nms
+};
+
+// 单 Worker 统计（计数为原子，跨线程安全）
+struct WorkerStats {
+    std::atomic<uint64_t> processed{0};  // 成功完成解码的帧数
+    std::atomic<uint64_t> rga_ok{0};
+    std::atomic<uint64_t> direct_ok{0};  // CPU 直拷帧数（YU cpu_direct 路径）
+    StatsCollector queue_wait;           // 排队等待（帧时间戳→worker 认领，YU buffer_age 同口径）
+    std::atomic<uint64_t> inference_ok{0};
+    std::atomic<uint64_t> decode_ok{0};
+    std::atomic<uint64_t> published{0};
+    std::atomic<uint64_t> errors{0};
+    std::atomic<uint64_t> skipped{0};    // 认领判断跳过（分配给其他 worker 或时序落后）
+    RknnStageStats stages;               // set_input / run / output / total
+    StatsCollector convert;              // uint8->FP16 转换耗时（us）
+    StatsCollector rga;                  // RGA process 耗时（us，测量层）
+    StatsCollector e2e;                  // 帧采集(单调时钟) -> 推理完成（us）
+    DecodeStageStats decode_stages;      // decode / nms / total
+    std::atomic<uint64_t> candidates{0}; // conf 过滤后候选数（累计）
+    std::atomic<uint64_t> detections{0}; // NMS 后目标数（累计）
+};
+
+// 单 Worker：独立 context + RGA + FP16 转换
+class InferenceWorker {
+public:
+    struct Params {
+        int id = 0;                 // worker 编号（0..N-1），决定认领 seq % N
+        int core_mask = 0;          // 绑定 NPU core（0=auto；多核绑定如 1/2/4）
+        std::string model_path;
+        bool pass_through = false;  // A-6 修正：pass_through=1 需 NPU 内部原生布局，
+                                    // 直喂 NHWC/NCHW 均产生错误推理；用 0 由 runtime
+                                    // 转换保证与 Python(rknnlite) 结果一致
+        uint32_t out_w = 0;         // 模型输入尺寸（config）
+        uint32_t out_h = 0;
+        LatestFrame* latest = nullptr;   // 共享最新帧（capture 提供，非拥有）
+        int total_workers = 1;
+        // A-6 Decode/NMS 参数（阈值来自 config；frame 尺寸用于坐标映射）
+        float conf_thres = 0.25f;
+        float iou_thres = 0.45f;
+        uint32_t frame_w = 0;       // 原图宽（0=不映射）
+        uint32_t frame_h = 0;
+        int color_order = 0;        // RGA 输出颜色（模型输入要求）：0=BGR, 1=RGB
+        ModelAdapter* adapter = nullptr;  // A-7：可选统一适配器
+        RuntimeConfig* runtime_config = nullptr;  // A-8：可选内存热更新配置（禁逐帧 JSON）
+        aim::AimTargetMailbox* aim_mailbox = nullptr;  // 新架构：Worker -> AimThread 目标邮箱
+    };
+
+    InferenceWorker() = default;
+    ~InferenceWorker();
+
+    bool start(const Params& params, std::string* error = nullptr);
+    void stop();
+    bool running() const { return running_.load(); }
+    const WorkerStats& stats() const { return stats_; }
+    int id() const { return id_; }
+
+private:
+    void loop();
+    // A-8：应用最新 RuntimeProfile（conf/iou/filter/max/FOV/ROI）到 decoder/RGA
+    void apply_runtime_profile();
+
+    Params params_;
+    std::atomic<bool> running_{false};
+    std::thread thread_;
+    std::unique_ptr<Preprocess> preprocess_;
+
+    std::unique_ptr<RKNNEngine> engine_;
+    std::unique_ptr<Decoder> decoder_;
+    std::vector<std::vector<uint8_t>> raw_outputs_;
+    std::vector<void*> raw_buf_ptrs_;
+    std::vector<size_t> raw_sizes_;
+    std::vector<DetectionBox> detections_; // 本帧检测结果，转换为 AimTargetTask
+    DetectionGeometryFilter geometry_filter_;
+    uint32_t last_seq_ = 0;
+    int id_ = -1;
+    WorkerStats stats_;
+    // A-8：热更新跟踪（避免每帧重复设置）
+    std::shared_ptr<const RuntimeProfile> applied_profile_;
+};
+
+// Worker 池：创建/启动/停止 N 个 InferenceWorker，聚合统计
+class WorkerPool {
+public:
+    struct Params {
+        std::string model_path;
+        std::vector<int> worker_cores;  // 每 worker core_mask（长度 = worker 数）
+        bool pass_through = false;      // A-6：false=由 runtime 转换（正确）；true=零拷贝（需内部布局）
+        uint32_t out_w = 0;
+        uint32_t out_h = 0;
+        LatestFrame* latest = nullptr;
+        // A-6 Decode/NMS（透传给每个 worker；阈值来自 config）
+        float conf_thres = 0.25f;
+        float iou_thres = 0.45f;
+        uint32_t frame_w = 0;
+        uint32_t frame_h = 0;
+        int color_order = 0;        // RGA 输出颜色（模型输入要求）：0=BGR, 1=RGB
+        ModelAdapter* adapter = nullptr;  // A-7：可选统一适配器
+        RuntimeConfig* runtime_config = nullptr;  // A-8：可选内存热更新配置（禁逐帧 JSON）
+        aim::AimTargetMailbox* aim_mailbox = nullptr;  // 新架构：Worker -> AimThread 目标邮箱
+    };
+
+    WorkerPool() = default;
+    ~WorkerPool() { stop(); }
+
+    // 创建并启动 N 个 worker（worker_cores.size() 决定数量）
+    bool start(const Params& params, std::string* error = nullptr);
+    void stop();
+
+    size_t worker_count() const { return workers_.size(); }
+    const std::vector<std::unique_ptr<InferenceWorker>>& workers() const { return workers_; }
+
+    // 聚合统计（只读）
+    uint64_t total_processed() const;
+    uint64_t total_errors() const;
+    uint64_t total_skipped() const;
+
+private:
+    std::vector<std::unique_ptr<InferenceWorker>> workers_;
+};
+
+}  // namespace ttbox::core

@@ -1,0 +1,6 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TTBOX 插件管理</title><link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"></head>
+<body><main class="app-shell"><section class="module-card"><h1>插件管理</h1><p>统一查看已安装插件、版本、状态和健康状态。</p><div id="pluginList">正在加载插件…</div><h2>插件市场</h2><p>插件市场接口已预留，当前使用本地模拟仓库，不连接在线服务。</p><script>
+fetch('/api/plugins').then(r=>r.json()).then(x=>{document.getElementById('pluginList').textContent=(x.data?.plugins||[]).map(p=>`${p.plugin_id} ${p.version} ${p.state}`).join('、')||'暂无插件'}).catch(()=>{document.getElementById('pluginList').textContent='插件状态暂不可用'});
+</script></section></main></body></html>

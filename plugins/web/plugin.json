@@ -1,0 +1,17 @@
+{
+  "id": "web",
+  "name": "TTBOX Web",
+  "version": "1.0.0",
+  "description": "TTBOX 网页控制面板",
+  "api_version": "1",
+  "entry": "bin/ttbox-web",
+  "type": "process",
+  "autostart": true,
+  "enabled": true,
+  "dependencies": ["core"],
+  "permissions": ["read_config", "write_config", "control_service", "read_core_status", "manage_model", "network", "hardware", "filesystem"],
+  "stop_timeout": 10,
+  "health_check": {"kind": "process"},
+  "config": "config",
+  "data": "data"
+}

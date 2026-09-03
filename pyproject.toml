@@ -1,0 +1,23 @@
+[project]
+name = "ttbox-module-edition"
+version = "0.1.0"
+description = "TTBOX-模块版：RK3588 AI 视觉盒子基础平台（HDMI 采集 / RGA / RKNN NPU / DecodeNMS / 目标选择 / Web 控制）"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "evdev>=1.7,<2.0",
+]
+
+[project.optional-dependencies]
+rknn = ["rknn-toolkit-lite2>=2.3.0"]
+dev = ["pytest>=7.0"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["framework*", "plugins*", "platform*", "ttbox_motion*"]
+
+[tool.pytest.ini_options]
+testpaths = ["framework/tests", "platform/tests"]

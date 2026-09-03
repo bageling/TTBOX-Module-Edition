@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>设备激活</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='activate.css') }}?v={{ asset_version }}-manual-reactivation-v1">
+</head>
+<body>
+  <main class="activation-shell">
+    <section class="activation-panel" aria-label="设备激活">
+      <div class="activation-head">
+        <span class="activation-mark">OK</span>
+        <div>
+          <p>Device Activation</p>
+          <h1>输入激活码后进入系统</h1>
+        </div>
+      </div>
+      <p id="activationStatus" class="activation-status">设备未激活，请输入激活码完成授权。</p>
+      <label class="activation-field">激活码
+        <input id="activationKeyInput" type="text" autocomplete="off" inputmode="text" placeholder="输入激活码">
+      </label>
+      <div class="activation-actions">
+        <button id="activateButton" type="button">激活设备</button>
+        <button id="refreshButton" type="button">刷新状态</button>
+        <button id="recoveryButton" type="button" disabled>本地全量修复</button>
+      </div>
+    </section>
+  </main>
+  <div id="activationToast" class="activation-toast" hidden></div>
+  <script src="{{ url_for('static', filename='activate.js') }}?v={{ asset_version }}-manual-reactivation-v1"></script>
+</body>
+</html>

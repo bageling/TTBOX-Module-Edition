@@ -1,0 +1,1728 @@
+<!doctype html>
+{% set visual_theme = active_visual_theme|default({'id': 'default', 'version': 'built-in', 'color_scheme': 'system', 'styles': []}, true) %}
+<html lang="zh-CN" data-ui-brand="{{ ui_brand }}" data-visual-theme="{{ visual_theme.id }}" data-visual-theme-color="{{ visual_theme.color_scheme }}" data-theme="{{ visual_theme.color_scheme if visual_theme.color_scheme in ['light', 'dark'] else default_theme }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>{{ app_title }}</title>
+  {% block page_styles %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v={{ asset_version }}-preset-rename-v1-model-import-preset-v1-yu-fan-system-card-v3-auto-calibration-v4-manual-values-v1-physical-button-block-v3-compact-page-head-v4-overview-layout-v4-back-flick-class-v1">
+  {% if motion_training_available is not defined or motion_training_available %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='motion_training.css') }}?v={{ asset_version }}-v7">
+  {% endif %}
+  {% for theme_style in visual_theme.styles %}
+  <link rel="stylesheet" href="{{ theme_style }}?v={{ visual_theme.version }}">
+  {% endfor %}
+  {% endblock %}
+</head>
+<body class="license-loading ui-brand-{{ ui_brand }}" data-active-page="home-page">
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="控制台导航">
+      <div class="brand">
+        <span id="brandMark" class="brand-mark" data-brand-mark>{{ brand_mark }}</span>
+        <div>
+          <p id="brandEyebrow" data-brand-eyebrow>{{ brand_eyebrow }}</p>
+          <h1 id="brandTitle" data-brand-title>{{ brand_title }}</h1>
+        </div>
+        <label class="auto-start-control mobile-auto-start-control">
+          <span>开机自启动</span>
+          <input type="checkbox" data-auto-start-toggle aria-label="开机自启动">
+          <i aria-hidden="true"></i>
+        </label>
+      </div>
+
+      <div class="status-strip" aria-live="polite">
+        <span id="statusBadge" class="status-badge idle">未连接</span>
+        <span id="applyIndicator" class="sync-badge ready">已同步</span>
+      </div>
+
+      {% block sidebar_power_actions %}{% endblock %}
+
+      {% if allow_theme_switch %}
+      <button id="themeToggleButton" class="theme-toggle" type="button" data-theme-toggle data-icon="sun" data-symbol="&#9728;" aria-label="切换主题">浅色</button>
+      {% endif %}
+
+      {% set module_labels = [
+        "总览", "热键", "移动控制", "辅助功能", "模型库",
+        "显示与鼠标", "网络配置", "预设参数", "系统设置", "系统更新"
+      ] %}
+      <nav class="module-tabs" aria-label="功能模块">
+        <button class="module-tab is-active" type="button" data-page-target="home-page">
+          <span>01</span>{{ module_labels[0] }}
+        </button>
+        <button class="module-tab" type="button" data-page-target="profiles-page">
+          <span>02</span>{{ module_labels[1] }}
+        </button>
+        <button class="module-tab" type="button" data-page-target="control-page">
+          <span>03</span>{{ module_labels[2] }}
+        </button>
+        <button class="module-tab" type="button" data-page-target="assist-page">
+          <span>04</span>{{ module_labels[3] }}
+        </button>
+        <button class="module-tab" type="button" data-page-target="model-page">
+          <span>05</span>{{ module_labels[4] }}
+        </button>
+        <button class="module-tab" type="button" data-page-target="hardware-page">
+          <span>06</span>{{ module_labels[5] }}
+        </button>
+        <button style="display:none" class="module-tab" type="button" data-page-target="hailo-page">
+          <span>07</span>Hailo-8
+        </button>
+        <button style="display:none" class="module-tab" type="button" data-page-target="kmbox-page">
+          <span>08</span>键鼠盒子
+        </button>
+        <button class="module-tab" type="button" data-page-target="wifi-page">
+          <span>09</span>{{ module_labels[6] }}
+        </button>
+        <button class="module-tab" type="button" data-page-target="preset-page">
+          <span>10</span>{{ module_labels[7] }}
+        </button>
+        <button style="display:none" class="module-tab" type="button" data-page-target="theme-store-page">
+          <span>11</span>主题商店
+        </button>
+        <button class="module-tab" type="button" data-page-target="license-page">
+          <span>11</span>{{ module_labels[8] }}
+        </button>
+        <button class="module-tab" type="button" data-page-target="update-page">
+          <span>12</span>{{ module_labels[9] }}
+        </button>
+      </nav>
+    </aside>
+    <div class="workspace">
+      <main class="page-stack">
+        <section id="home-page" class="page-card is-active" data-page>
+          <section id="homeActivationPanel" class="home-activation-panel" aria-label="设备激活">
+            <div class="home-activation-copy">
+              <p>设备授权</p>
+              <h3>输入卡密后首次联网激活</h3>
+            </div>
+            <label class="field">卡密<input id="licenseKeyInput" type="text" autocomplete="off" placeholder="输入卡密"></label>
+            <div class="home-activation-actions">
+              <button id="activateLicenseButton" class="ghost-button" type="button">激活设备</button>
+              <button id="refreshLicenseButton" class="ghost-button" type="button">刷新状态</button>
+            </div>
+          </section>
+
+          <div class="dashboard-grid">
+            <section class="preview-panel" aria-label="实时预览">
+              <div class="panel-title">
+                <div>
+                  <p>实时画面</p>
+                  <h3>低帧预览</h3>
+                </div>
+                <span class="pill">MJPEG</span>
+              </div>
+              <div class="preview-stage">
+                <img id="previewImage" alt="实时预览">
+                <div id="targetBoxOverlay" class="target-box-overlay" aria-hidden="true">
+                  <span id="targetBoxLabel" class="target-box-label"></span>
+                </div>
+                <div id="aimRangeOverlay" class="aim-range-overlay" aria-hidden="true"></div>
+                <div id="aimReferenceDot" class="aim-reference-dot" aria-hidden="true"></div>
+              </div>
+            </section>
+
+            <div class="dashboard-data" aria-label="运行数据">
+              <div class="rail-head dashboard-data-head">
+                <p>运行数据</p>
+                <h3>实时状态</h3>
+              </div>
+
+              <div class="quick-metrics" aria-label="核心状态">
+                <div>
+                  <span>链路延迟</span>
+                  <strong id="mobileLatency">-- ms</strong>
+                </div>
+                <div>
+                  <span>采集帧率</span>
+                  <strong id="mobileCaptureFps">-- 帧/秒</strong>
+                </div>
+                <div>
+                  <span>检测帧率</span>
+                  <strong id="mobileFps">-- 帧/秒</strong>
+                </div>
+                <div>
+                  <span>Hailo 温度</span>
+                  <strong id="mobileHailoTemperature">--</strong>
+                </div>
+                <div>
+                  <span>目标状态</span>
+                  <strong id="mobileVideoStatus">待机</strong>
+                </div>
+              </div>
+
+              <section id="runtimeSummary" class="runtime-summary dashboard-data-runtime" aria-label="实时状态指标"></section>
+            </div>
+
+            <section class="hero-control" aria-label="启动控制">
+              <div class="hero-copy">
+                <p>主控</p>
+                <h2>实时锁定</h2>
+              </div>
+
+              <button id="startButton" class="power-button start" type="button">
+                <span class="power-ring"></span>
+                <strong>启动</strong>
+              </button>
+
+              <label class="auto-start-control desktop-auto-start-control">
+                <span>开机自启动</span>
+                <input type="checkbox" data-auto-start-toggle aria-label="开机自启动">
+                <i aria-hidden="true"></i>
+              </label>
+
+              <div class="config-hidden" hidden>
+                <input id="capture_device" data-config type="hidden" value="/dev/video0">
+                <input id="capture_format_preference" data-config type="hidden" value="auto">
+                <input id="capture_nv12_uv_swapped" data-config type="checkbox">
+                <input id="capture_nv12_bt709" data-config type="checkbox">
+                <input id="capture_nv12_full_range" data-config type="checkbox">
+                <input id="pos" data-config type="hidden" value="0.5">
+              </div>
+            </section>
+
+            <section class="overview-controls" aria-label="基础检测设置">
+              <div class="slider-field crop-size-field">
+                <div class="label-row">
+                  <label for="capture_crop_size">{{ "模型规格" if ui_brand == "xh" else "截取尺寸" }}</label>
+                  <input id="capture_crop_size" data-config class="value-input" type="number" min="1" max="1080" step="1" inputmode="numeric">
+                </div>
+                <input id="capture_crop_size_range" class="crop-size-preset-range" type="range" min="0" max="4" step="1" aria-label="截取尺寸预设">
+                <div class="crop-size-presets" aria-hidden="true">
+                  <span>192</span>
+                  <span>256</span>
+                  <span>320</span>
+                  <span>416</span>
+                  <span>640</span>
+                </div>
+              </div>
+
+              <div class="slider-field">
+                <div class="label-row">
+                  <label for="range_factor_range">{{ "范围大小" if ui_brand == "xh" else "FOV 半径" }}</label>
+                  <input id="range_factor" data-config class="value-input" type="number" min="0" max="1" step="0.01">
+                </div>
+                <input id="range_factor_range" type="range" min="0" max="1" step="0.01">
+              </div>
+
+              <label class="field overview-field xh-hidden-offset-field">{{ "X轴偏移" if ui_brand == "xh" else "截取位置 X轴偏移" }}
+                <input id="capture_crop_offset_x" data-config class="value-input" type="number" min="-150" max="150" step="1">
+              </label>
+
+              <label class="field overview-field xh-hidden-offset-field">{{ "Y轴偏移" if ui_brand == "xh" else "截取位置 Y轴偏移" }}
+                <input id="capture_crop_offset_y" data-config class="value-input" type="number" min="-150" max="150" step="1">
+              </label>
+
+              <label class="field overview-field xh-hidden-offset-field">{{ "X轴偏移" if ui_brand == "xh" else "瞄准点 X轴偏移" }}
+                <input id="controller_aim_reference_offset_x" data-config class="value-input" type="number" min="-160" max="160" step="1">
+              </label>
+
+              <label class="field overview-field xh-hidden-offset-field">{{ "Y轴偏移" if ui_brand == "xh" else "瞄准点 Y轴偏移" }}
+                <input id="controller_aim_reference_offset_y" data-config class="value-input" type="number" min="-160" max="160" step="1">
+              </label>
+
+              <div class="slider-field">
+                <div class="label-row">
+                  <label for="video_detection_confidence_range">{{ "置信度" if ui_brand == "xh" else "目标置信度" }}</label>
+                  <input id="video_detection_confidence" data-config class="value-input" type="number" min="0" max="1" step="0.01">
+                </div>
+                <input id="video_detection_confidence_range" type="range" min="0" max="1" step="0.01">
+              </div>
+
+              <div class="slider-field">
+                <div class="label-row">
+                  <label for="video_detection_iou_range">{{ "重叠过滤" if ui_brand == "xh" else "重叠过滤 IoU" }}</label>
+                  <input id="video_detection_iou" data-config class="value-input" type="number" min="0" max="1" step="0.01">
+                </div>
+                <input id="video_detection_iou_range" type="range" min="0" max="1" step="0.01">
+              </div>
+
+              <button id="resetOverviewDefaultsButton" class="ghost-button overview-reset-button" type="button">重置所有</button>
+            </section>
+
+            <section class="hardware-strip" aria-label="硬件状态">
+              <div class="rail-head hardware-strip-head">
+                <p>硬件状态</p>
+                <h3>板载资源</h3>
+              </div>
+              <section id="systemSummary" class="system-summary" aria-label="硬件状态"></section>
+            </section>
+
+            {% block overview_power_actions %}
+              <section class="overview-power-actions" aria-label="电源控制">
+                <button id="rebootSystemButton" class="ghost-button" type="button">重启设备</button>
+                <button id="poweroffSystemButton" class="danger-button" type="button">关机</button>
+              </section>
+            {% endblock %}
+          </div>
+        </section>
+        <section id="profiles-page" class="page-card" data-page>
+          <div class="page-head mobile-action-head">
+            <div>
+              <p>热键控制</p>
+              <h2>热键与类别</h2>
+            </div>
+            <div class="profile-head-actions">
+              <button id="physicalButtonBlockButton" class="ghost-button" type="button">屏蔽物理按键</button>
+              <button id="addAimProfileButton" class="ghost-button" type="button">新增热键</button>
+            </div>
+          </div>
+          <section class="hotkey-guard-panel" aria-label="全局热键禁用" data-feature-status="planned">
+            <label class="toggle-row">
+              <span>一键禁用所有热键</span>
+              <input id="hotkey_guard_enabled" type="checkbox" data-config disabled>
+            </label>
+            <label class="field">切换按键
+              <select id="hotkey_guard_toggle_hotkey" data-config disabled></select>
+              <span class="field-hint">计划中：当前运行核心尚未提供全局热键禁用能力。</span>
+            </label>
+            <div class="hotkey-guard-status">
+              <span>功能状态</span>
+              <strong id="hotkeyGuardRuntimeStatus">计划中</strong>
+            </div>
+          </section>
+          <div id="aimProfilesEditor" class="aim-profile-list"></div>
+        </section>
+
+        <section id="control-page" class="page-card" data-page>
+          <div class="page-head movement-control-head">
+            <div>
+              <p>{{ "PID设置" if ui_brand == "xh" else "移动控制" }}</p>
+              <h2>{{ "PID设置" if ui_brand == "xh" else "移动控制" }}</h2>
+            </div>
+            <div class="diagnostic-actions">
+              <button id="resetControllerDefaultsButton" class="ghost-button" type="button" hidden>恢复本页默认值</button>
+              {% if show_aim_trace_button %}
+              <button id="recordAimTraceButton" class="ghost-button" type="button">记录10秒移动日志</button>
+              <span id="recordAimTraceStatus" class="trace-status"></span>
+              {% endif %}
+            </div>
+          </div>
+
+          <nav class="control-section-tabs" aria-label="{{ 'PID设置分区' if ui_brand == 'xh' else '移动控制分区' }}">
+            <button id="controlSectionTabAutoCalibration" class="control-section-tab is-active" type="button" data-control-section-target="control-section-auto-calibration" aria-selected="true">
+              <span>01</span>自动标定
+            </button>
+            <button id="controlSectionTabPid" class="control-section-tab" type="button" data-control-section-target="control-section-pid" aria-selected="false">
+              <span>02</span>PID
+            </button>
+            <button id="controlSectionTabPullCurve" class="control-section-tab" type="button" data-control-section-target="control-section-pull-curve" aria-selected="false">
+              <span>03</span>拉枪曲线
+            </button>
+            <button id="controlSectionTabContinuousLead" class="control-section-tab" type="button" data-control-section-target="control-section-continuous-lead" aria-selected="false">
+              <span>04</span>持续提前量
+            </button>
+            <button id="controlSectionTabPhysicalMotionBlock" class="control-section-tab" type="button" data-control-section-target="control-section-physical-motion-block" aria-selected="false">
+              <span>05</span>屏蔽物理移动
+            </button>
+            {% if motion_training_available is not defined or motion_training_available %}
+            <button id="controlSectionTabMotionTraining" class="control-section-tab" type="button" data-control-section-target="control-section-motion-training" aria-selected="false">
+              <span>06</span>个性曲线训练
+            </button>
+            {% endif %}
+          </nav>
+
+          <div class="control-section-stack">
+            <section id="control-section-pid" class="control-section" data-control-section hidden>
+              <div class="assist-grid control-group-grid">
+                <div class="pid-control-block">
+                  <div class="field-grid compact pid-rate-grid">
+                    <label class="field"><span class="field-label">移动倍率</span><input id="sens" data-config class="value-input" type="number" min="0" max="5" step="0.01"><input id="sens_range" type="range" min="0" max="5" step="0.01"><span class="field-hint">移动算法的最终输出倍率。一般无需调整，只需调节 PID 参数即可；整体追不上再小幅增加。</span></label>
+                  </div>
+                  <div class="module-title"><strong>PID 控制器</strong></div>
+                  <div class="field-grid compact pid-field-grid">
+                    <label class="field"><span class="field-label">X轴拉力</span><input id="controller_kp_x" data-config type="number" step="0.1" max="100"><span class="field-hint">KP X；X轴方向把准星拉向目标的力度。追不上就加一点；来回冲就降一点。</span></label>
+                    <label class="field"><span class="field-label">Y轴拉力</span><input id="controller_kp_y" data-config type="number" step="0.1" max="100"><span class="field-hint">KP Y；Y轴方向把准星拉向目标的力度。抬不上去就加；Y轴晃就降。</span></label>
+                    <label class="field"><span class="field-label">X轴预判</span><input id="controller_predict_x" data-config type="number" step="0.05" max="3"><span class="field-hint">PREDICT X；目标横着跑时提前往前看一点。滞后就加，提前过头就降。</span></label>
+                    <label class="field"><span class="field-label">Y轴预判</span><input id="controller_predict_y" data-config type="number" step="0.05" max="3"><span class="field-hint">PREDICT Y；目标Y轴移动时提前看一点。一般保持很小，落地抖就别加。</span></label>
+                    <label class="field"><span class="field-label">X轴积分</span><input id="controller_ki_x" data-config type="number" step="0.01"><span class="field-hint">KI X；补偿长期残余误差。默认 0；小幅增加即可，过高容易漂移或来回晃。</span></label>
+                    <label class="field"><span class="field-label">Y轴积分</span><input id="controller_ki_y" data-config type="number" step="0.01"><span class="field-hint">KI Y；补偿长期残余误差。默认 0；小幅增加即可，过高容易漂移或来回晃。</span></label>
+                    <label class="field"><span class="field-label">X轴刹车</span><input id="controller_kd_x" data-config type="number" step="0.1" max="30"><span class="field-hint">KD X；对X轴速度变化做刹车。数值大容易抖，晃的时候优先调低。</span></label>
+                    <label class="field"><span class="field-label">Y轴刹车</span><input id="controller_kd_y" data-config type="number" step="0.1" max="30"><span class="field-hint">KD Y；对Y轴速度变化做刹车。跳跃、落地发抖时先调低或关掉。</span></label>
+                    <label class="field"><span class="field-label">X轴跟随</span><input id="controller_rate_x" data-config type="number" step="0.01"><span class="field-hint">RATE X；X轴输出变强的速度。反应慢就加一点；突然一窜就降一点。</span></label>
+                    <label class="field"><span class="field-label">Y轴跟随</span><input id="controller_rate_y" data-config type="number" step="0.01"><span class="field-hint">RATE Y；Y轴输出变强的速度。压不住高度差就加；Y轴突跳就降。</span></label>
+                    <label class="field"><span class="field-label">基础死区</span><input id="controller_output_deadzone" data-config type="number" step="0.01"><span class="field-hint">OUTPUT DEADZONE；最终死区会按检测框大小自动放宽。基础值大了更稳，小了修得更细。</span></label>
+                  </div>
+                </div>
+                <article class="module-tile">
+                  <div class="module-title"><strong>目标锁定</strong></div>
+                  <div class="field-grid compact">
+                    <label class="field"><span class="field-label">转火延迟 ms</span><input id="controller_selector_lost_grace_ms" data-config type="number" step="1"><span class="field-hint">目标丢失后切换到下一个目标的等待时间</span></label>
+                  </div>
+                </article>
+                <article class="module-tile">
+                  <div class="module-title"><strong>开火延迟释放Y轴</strong></div>
+                  <label class="check-line"><input id="controller_aim_fire_lock_y" data-config type="checkbox"> 开火延迟释放Y轴</label>
+                  <div class="field-grid compact">
+                    <label class="field">开火按键<select id="controller_y_axis_fire_hotkey" data-config></select><span class="field-hint">用于判断开火状态，默认左键。</span></label>
+                    <label class="field"><span class="field-label">释放延迟 s</span><input id="controller_y_axis_fire_release_delay_sec" data-config type="number" step="0.01"><span class="field-hint">持续开火超过该时长后，停止输出Y轴方向，只保留X轴跟随。</span></label>
+                  </div>
+                </article>
+              </div>
+            </section>
+
+            <section id="control-section-pull-curve" class="control-section" data-control-section hidden>
+              <div class="assist-grid control-group-grid pull-curve-grid">
+                <article class="module-tile pull-curve-card">
+                  <div class="module-title"><strong>拉枪曲线</strong></div>
+                  <label class="check-line"><input id="controller_pull_curve_enabled" data-config type="checkbox"> 启用拉枪曲线</label>
+                  <div class="field-grid compact">
+                    <label class="field"><span class="field-label">曲线强度</span><input id="controller_pull_curve_strength" data-config type="number" min="0" max="2" step="0.01"><span class="field-hint">只在新目标远距离拉枪时加入轻微弧线；0 为关闭，越高弧线越明显。</span></label>
+                    <label class="field"><span class="field-label">随机抖动 px</span><input id="controller_pull_curve_jitter_px" data-config type="number" min="0" max="12" step="0.1"><span class="field-hint">只在拉枪曲线期间加入，0 为关闭，越高随机感越明显。</span></label>
+                    <label class="field"><span class="field-label">启用距离 px</span><input id="controller_pull_curve_min_distance" data-config type="number" min="0" max="1280" step="1"><span class="field-hint">目标离准星超过该距离才启用；锁定后自动停止。</span></label>
+                  </div>
+                </article>
+              </div>
+            </section>
+
+            <section id="control-section-continuous-lead" class="control-section" data-control-section hidden>
+              <div class="assist-grid control-group-grid continuous-lead-grid">
+                <article class="module-tile continuous-lead-card">
+                  <div class="module-title"><strong>持续提前量</strong></div>
+                  <label class="check-line"><input id="controller_continuous_lead_enabled" data-config type="checkbox"> 启用持续提前量</label>
+                  <div class="field-grid compact">
+                    <label class="field"><span class="field-label">进入距离 px</span><input id="controller_continuous_lead_enter_distance" data-config type="number" min="0" max="1280" step="1"><span class="field-hint">AI输出在X轴持续同方向累计超过该距离后，开始给瞄准点加入提前偏置。</span></label>
+                    <label class="field"><span class="field-label">提前量系数</span><input id="controller_continuous_lead_scale" data-config type="number" min="0" max="1" step="0.01"><span class="field-hint">偏置大小为目标框宽度乘该系数；0 为不产生偏置。</span></label>
+                    <label class="field"><span class="field-label">渐入时间 ms</span><input id="controller_continuous_lead_fade_in_ms" data-config type="number" min="0" max="1000" step="10"><span class="field-hint">达到进入距离后，提前量从0过渡到目标值的时间。</span></label>
+                    <label class="field"><span class="field-label">渐出时间 ms</span><input id="controller_continuous_lead_fade_out_ms" data-config type="number" min="0" max="1000" step="10"><span class="field-hint">停止同方向移动或反向时，提前量回到0的时间。</span></label>
+                    <label class="field"><span class="field-label">近距离禁用占比</span><input id="controller_continuous_lead_near_disable_ratio" data-config type="number" min="0" max="1" step="0.01"><span class="field-hint">目标框宽度占裁剪宽度达到该比例时，持续提前量直接关闭。</span></label>
+                  </div>
+                </article>
+              </div>
+            </section>
+
+            <section id="control-section-physical-motion-block" class="control-section" data-control-section hidden>
+              <div class="assist-grid control-group-grid">
+                <article class="module-tile">
+                  <div class="module-title"><strong>屏蔽物理移动</strong><span id="physicalMotionBlockSupport" class="status-badge idle">检查中</span></div>
+                  <label class="check-line"><input id="controller_block_physical_mouse_x_while_aiming" data-config type="checkbox"> 瞄准时屏蔽鼠标移动X轴</label>
+                  <label class="check-line"><input id="controller_block_physical_mouse_y_while_aiming" data-config type="checkbox"> 瞄准时屏蔽鼠标移动Y轴</label>
+                  <p id="physicalMotionBlockHint" class="field-hint"></p>
+                </article>
+              </div>
+            </section>
+
+            <section id="control-section-auto-calibration" class="control-section is-active" data-control-section>
+              <div class="auto-calibration-layout">
+                <div class="auto-calibration-primary">
+                  <div class="module-title"><strong>自动标定</strong><span id="autoCalibrationStatusBadge" class="status-badge idle">等待目标</span></div>
+                  <div class="auto-calibration-guide">
+                    <strong>使用步骤</strong>
+                    <ol>
+                      <li>将准星对准一个静止、完整可见的目标，并让目标检测框在预览画面中左右空白足够，一般距离目标10米左右即可。</li>
+                      <li>保持游戏视角和物理鼠标静止，等待系统完成多帧检测；显示“目标稳定”后按钮会自动可用。</li>
+                      <li>开始后不要移动或点击鼠标，也不要切换视角，等待水平往返移动结束并保存结果。</li>
+                    </ol>
+                  </div>
+                  <button id="startAutoCalibrationButton" class="primary-button auto-calibration-start" type="button" disabled>开始自动标定</button>
+                  <div id="autoCalibrationSuccess" class="auto-calibration-success" role="status" aria-live="polite" hidden>
+                    <span class="auto-calibration-success-icon" aria-hidden="true">✓</span>
+                    <div><strong id="autoCalibrationSuccessTitle">自动标定成功</strong><span id="autoCalibrationSuccessSummary"></span></div>
+                  </div>
+                  <p id="autoCalibrationReason" class="auto-calibration-reason" data-state="waiting">正在检查目标状态</p>
+                  <div class="auto-calibration-progress" aria-label="标定进度">
+                    <div id="autoCalibrationProgressBar"></div>
+                  </div>
+                  <div class="auto-calibration-actions">
+                    <button id="cancelAutoCalibrationButton" class="ghost-button" type="button" disabled>取消标定</button>
+                    <button id="clearAutoCalibrationButton" class="ghost-button" type="button">清除标定</button>
+                  </div>
+                </div>
+                <div class="auto-calibration-stats">
+                  <div class="runtime-stat"><span>当前候选</span><strong id="autoCalibrationCandidate">--</strong></div>
+                  <div class="runtime-stat"><span>稳定采样</span><strong id="autoCalibrationStability">--</strong></div>
+                  <label class="runtime-stat auto-calibration-editable-stat"><span>X 轴响应</span><span class="auto-calibration-value-control"><input id="autoCalibrationGainX" type="number" min="0.03" max="8" step="0.001" inputmode="decimal" required><b>px/count</b></span></label>
+                  <label class="runtime-stat auto-calibration-editable-stat"><span>Y 轴响应</span><span class="auto-calibration-value-control"><input id="autoCalibrationGainY" type="number" min="0.03" max="8" step="0.001" inputmode="decimal" required><b>px/count</b></span></label>
+                  <label class="runtime-stat auto-calibration-editable-stat"><span>鼠标响应延迟</span><span class="auto-calibration-value-control"><input id="autoCalibrationDelay" type="number" min="0" max="50" step="0.001" inputmode="decimal" required><b>ms</b></span></label>
+                  <div class="auto-calibration-manual-actions"><button id="saveAutoCalibrationValuesButton" class="primary-button" type="button" disabled>保存手动参数</button></div>
+                  <div class="runtime-stat"><span>置信度</span><strong id="autoCalibrationConfidence">未标定</strong></div>
+                  <div class="runtime-stat"><span>对应模型</span><strong id="autoCalibrationModel">--</strong></div>
+                  <div class="runtime-stat"><span>采集上下文</span><strong id="autoCalibrationContext">--</strong></div>
+                  <div class="runtime-stat"><span>标定时间</span><strong id="autoCalibrationTime">--</strong></div>
+                </div>
+              </div>
+            </section>
+
+            {% if motion_training_available is not defined or motion_training_available %}
+            {% if motion_training_collection_available is defined and not motion_training_collection_available %}
+            {% include "motion_training_mobile.html" %}
+            {% else %}
+            {% include "motion_training.html" %}
+            {% endif %}
+            {% endif %}
+
+          </div>
+        </section>
+
+        <section id="assist-page" class="page-card" data-page>
+          <div class="page-head assist-page-head mobile-action-head">
+            <div>
+              <p>{{ "自定义设置" if ui_brand == "xh" else "辅助功能" }}</p>
+              <h2>{{ "自定义设置" if ui_brand == "xh" else "辅助功能" }}</h2>
+            </div>
+            <div class="diagnostic-actions">
+              <button id="resetAssistDefaultsButton" class="ghost-button" type="button">恢复本页默认值</button>
+            </div>
+          </div>
+
+          <nav class="control-section-tabs assist-section-tabs" aria-label="{{ '自定义设置分区' if ui_brand == 'xh' else '辅助功能分区' }}">
+            <button id="assistSectionTabRecoil" class="control-section-tab is-active" type="button" data-assist-section-target="assist-section-recoil" aria-selected="true">
+              <span>01</span>压枪
+            </button>
+            <button id="assistSectionTabTrigger" class="control-section-tab" type="button" data-assist-section-target="assist-section-trigger" aria-selected="false">
+              <span>02</span>自动开火
+            </button>
+            <button id="assistSectionTabRapid" class="control-section-tab" type="button" data-assist-section-target="assist-section-rapid" aria-selected="false">
+              <span>03</span>连点
+            </button>
+            <button id="assistSectionTabBackFlick" class="control-section-tab" type="button" data-assist-section-target="assist-section-back-flick" aria-selected="false">
+              <span>04</span>自动背闪
+            </button>
+            <button id="assistSectionTabCrosshair" class="control-section-tab" type="button" data-assist-section-target="assist-section-crosshair" aria-selected="false">
+              <span>05</span>准星找色
+            </button>
+            {% if ui_brand == "xh" %}
+              <button id="assistSectionTabFan" class="control-section-tab" type="button" data-assist-section-target="fan-page" aria-selected="false">
+                <span>06</span>风扇设置
+              </button>
+            {% endif %}
+          </nav>
+
+          <div class="assist-section-stack">
+            <section id="assist-section-recoil" class="assist-section is-active" data-assist-section>
+              <article class="module-tile assist-card-recoil">
+                <div class="module-title">
+                  <h3>压枪</h3>
+                  <label class="switch"><input id="recoil_enabled" data-config type="checkbox"><span></span></label>
+                </div>
+                <div class="assist-section-body">
+                  <div class="field-grid compact assist-field-pair">
+                    <label class="field">主按键<select id="recoil_hotkey" data-config></select><span class="field-hint">压枪的主要触发键，通常保持左键。</span></label>
+                    <label class="field">副按键<select id="recoil_hotkey2" data-config></select><span class="field-hint">可选第二触发键；不使用时只看主按键。</span></label>
+                    <label class="field">触发方式
+                      <select id="recoil_hotkey_mode" data-config>
+                        <option value="any">任一按键</option>
+                        <option value="all">同时按下</option>
+                      </select>
+                      <span class="field-hint">选择副按键后，决定任一按键触发还是两个键同时按住才触发。</span>
+                    </label>
+                    <label class="field">下压强度<input id="recoil_strength" data-config type="number" step="1"><span class="field-hint">每秒下移像素基准，0 为不输出；越大压得越重。</span></label>
+                    <input id="recoil_speed" data-config type="hidden" value="1">
+                  </div>
+                  <div class="check-field">
+                    <label class="check-line"><input id="recoil_only_when_target_visible" data-config type="checkbox"> 仅有目标时压枪</label>
+                    <span class="field-hint">开启后画面中检测到目标才会下压；关闭时保持默认逻辑，按住热键就下压。</span>
+                  </div>
+                  <div class="field-grid compact assist-field-pair">
+                    <label class="field">目标丢失释放 ms<input id="recoil_target_lost_release_ms" data-config type="number" step="10"><span class="field-hint">仅有目标时压枪开启后，目标消失仍保持压枪的时间；0 为立即释放。</span></label>
+                  </div>
+                  <div class="check-field">
+                    <label class="check-line"><input id="recoil_trigger_delay_enabled" data-config type="checkbox"> 延迟触发压枪</label>
+                    <span class="field-hint">开启后，只有压枪热键持续按住超过设定时间才开始下压。</span>
+                  </div>
+                  <div class="field-grid compact assist-field-pair">
+                    <label class="field">压枪延迟 ms<input id="recoil_trigger_delay_ms" data-config type="number" step="10"><span class="field-hint">用于避免单点时下压；松开热键后会重新计时。</span></label>
+                  </div>
+                  <div class="check-field">
+                    <label class="check-line"><input id="recoil_humanize_enabled" data-config type="checkbox"> 启用拟人曲线</label>
+                    <span class="field-hint">开启后下压会带缓入缓出和轻微横向变化，手感更自然。</span>
+                  </div>
+                  <div class="field-grid compact assist-humanize-grid">
+                    <label class="field">曲线强度<input id="recoil_humanize_curve_strength" data-config type="number" step="0.01"><span class="field-hint">下压拆步的缓入缓出比例，高一点更柔，太高会慢半拍。</span></label>
+                    <label class="field">横向抖动<input id="recoil_humanize_jitter_px" data-config type="number" step="0.01"><span class="field-hint">压枪时附加的X轴微动幅度，数值过高会明显X轴晃。</span></label>
+                    <label class="field">抖动频率<input id="recoil_humanize_jitter_frequency" data-config type="number" step="0.1"><span class="field-hint">X轴微动的变化速度，低一点更稳，高一点更碎。</span></label>
+                  </div>
+                </div>
+              </article>
+            </section>
+
+            <section id="assist-section-trigger" class="assist-section" data-assist-section hidden>
+              <div class="assist-section-body auto-trigger-section-body">
+                <div class="auto-trigger-config-toolbar">
+                  <div>
+                    <strong>开火配置</strong>
+                    <span class="field-hint">每条配置独立决定按住热键和目标类别；准星进入匹配目标框内即可触发。</span>
+                  </div>
+                  <button id="addAutoTriggerProfileButton" class="mini-button" type="button">新增配置</button>
+                </div>
+                <div id="autoTriggerProfilesEditor" class="aim-profile-list auto-trigger-profile-list"></div>
+              </div>
+            </section>
+
+            <section id="assist-section-rapid" class="assist-section" data-assist-section hidden>
+              <article class="module-tile assist-card-rapid">
+                <div class="module-title">
+                  <h3>连点</h3>
+                  <label class="switch"><input id="rapid_fire_enabled" data-config type="checkbox"><span></span></label>
+                </div>
+                <div class="assist-section-body">
+                  <label class="field">触发按键<select id="rapid_fire_hotkey" data-config></select><span class="field-hint">按住该键时循环模拟左键点击。</span></label>
+                  <div class="field-grid compact assist-field-pair">
+                    <label class="field">基础按下时间<input id="rapid_fire_press_base_ms" data-config type="number" step="1"><span class="field-hint">每次左键按住的基准毫秒数；实际会加入随机浮动，偶尔会慢一拍。</span></label>
+                    <label class="field">基础间隔时间<input id="rapid_fire_interval_base_ms" data-config type="number" step="1"><span class="field-hint">两次点击之间的基准间隔；实际会加入随机浮动，越小连点越快。</span></label>
+                  </div>
+                </div>
+              </article>
+            </section>
+
+            <section id="assist-section-back-flick" class="assist-section" data-assist-section hidden>
+              <article class="module-tile assist-card-back-flick">
+                <div class="module-title">
+                  <h3>自动背闪</h3>
+                  <label class="switch"><input id="auto_back_flick_enabled" data-config type="checkbox"><span></span></label>
+                </div>
+                <div class="assist-section-body">
+                  <div id="autoBackFlickClassPicker" class="class-picker auto-back-flick-class-picker"></div>
+                </div>
+              </article>
+            </section>
+
+            <section id="assist-section-crosshair" class="assist-section" data-assist-section hidden>
+              <article class="module-tile assist-card-crosshair">
+                <div class="module-title">
+                  <h3>准星找色</h3>
+                  <label class="switch"><input id="crosshair_detection_enabled" data-config type="checkbox"><span></span></label>
+                </div>
+                <div class="assist-section-body">
+                  <div class="crosshair-fire-gate">
+                    <label class="field">主按键<select id="crosshair_hotkey" data-config></select><span class="field-hint">准星找色的主要触发键；选择自动时启用后始终生效。</span></label>
+                    <label class="field">副按键<select id="crosshair_hotkey2" data-config></select><span class="field-hint">可选第二触发键；不使用时只看主按键。</span></label>
+                    <label class="field">触发方式
+                      <select id="crosshair_hotkey_mode" data-config>
+                        <option value="any">任一按键</option>
+                        <option value="all">同时按住</option>
+                      </select>
+                      <span class="field-hint">选择副按键后，决定任一按键触发还是同时按下触发。</span>
+                    </label>
+                  </div>
+                  <div class="field-grid compact assist-field-pair">
+                    <label class="field">ROI 宽<input id="crosshair_roi_w" data-config type="number" min="2" max="150" step="1"><span class="field-hint">围绕画面中心横向取样范围。</span></label>
+                    <label class="field">ROI 高<input id="crosshair_roi_h" data-config type="number" min="2" max="150" step="1"><span class="field-hint">围绕画面中心纵向取样范围。</span></label>
+                  </div>
+                  <div class="crosshair-color-slots" aria-label="准星颜色">
+                    <details id="crosshair_slot_0" class="crosshair-color-slot" open>
+                      <summary>
+                        <span>颜色1</span>
+                        <label class="crosshair-slot-enable"><input id="crosshair_slot_0_enabled" data-config type="checkbox">启用</label>
+                      </summary>
+                      <div class="crosshair-slot-options">
+                        <label class="crosshair-color-option"><input id="crosshair_slot_0_color_red" name="crosshair_slot_0_color" data-config type="radio" value="red"><span class="crosshair-color-swatch crosshair-color-red"></span><span>红色</span></label>
+                        <label class="crosshair-color-option"><input id="crosshair_slot_0_color_green" name="crosshair_slot_0_color" data-config type="radio" value="green"><span class="crosshair-color-swatch crosshair-color-green"></span><span>绿色</span></label>
+                        <label class="crosshair-color-option"><input id="crosshair_slot_0_color_blue" name="crosshair_slot_0_color" data-config type="radio" value="blue"><span class="crosshair-color-swatch crosshair-color-blue"></span><span>蓝色</span></label>
+                        <label class="crosshair-color-option"><input id="crosshair_slot_0_color_cyan" name="crosshair_slot_0_color" data-config type="radio" value="cyan"><span class="crosshair-color-swatch crosshair-color-cyan"></span><span>青色</span></label>
+                        <label class="crosshair-color-option"><input id="crosshair_slot_0_color_yellow" name="crosshair_slot_0_color" data-config type="radio" value="yellow"><span class="crosshair-color-swatch crosshair-color-yellow"></span><span>黄色</span></label>
+                        <label class="crosshair-color-option"><input id="crosshair_slot_0_color_white" name="crosshair_slot_0_color" data-config type="radio" value="white"><span class="crosshair-color-swatch crosshair-color-white"></span><span>白色</span></label>
+                        <label class="crosshair-color-option"><input id="crosshair_slot_0_color_black" name="crosshair_slot_0_color" data-config type="radio" value="black"><span class="crosshair-color-swatch crosshair-color-black"></span><span>黑色</span></label>
+                      </div>
+                    </details>
+                    <details id="crosshair_slot_1" class="crosshair-color-slot">
+                      <summary>
+                        <span>颜色2</span>
+                        <label class="crosshair-slot-enable"><input id="crosshair_slot_1_enabled" data-config type="checkbox">启用</label>
+                      </summary>
+                      <div class="crosshair-slot-options">
+                        <label class="crosshair-color-option"><input id="crosshair_slot_1_color_red" name="crosshair_slot_1_color" data-config type="radio" value="red"><span class="crosshair-color-swatch crosshair-color-red"></span><span>红色</span></label>
+                        <label class="crosshair-color-option"><input id="crosshair_slot_1_color_green" name="crosshair_slot_1_color" data-config type="radio" value="green"><span class="crosshair-color-swatch crosshair-color-green"></span><span>绿色</span></label>
+                        <label class="crosshair-color-option"><input id="crosshair_slot_1_color_blue" name="crosshair_slot_1_color" data-config type="radio" value="blue"><span class="crosshair-color-swatch crosshair-color-blue"></span><span>蓝色</span></label>
+                        <label class="crosshair-color-option"><input id="crosshair_slot_1_color_cyan" name="crosshair_slot_1_color" data-config type="radio" value="cyan"><span class="crosshair-color-swatch crosshair-color-cyan"></span><span>青色</span></label>
+                        <label class="crosshair-color-option"><input id="crosshair_slot_1_color_yellow" name="crosshair_slot_1_color" data-config type="radio" value="yellow"><span class="crosshair-color-swatch crosshair-color-yellow"></span><span>黄色</span></label>
+                        <label class="crosshair-color-option"><input id="crosshair_slot_1_color_white" name="crosshair_slot_1_color" data-config type="radio" value="white"><span class="crosshair-color-swatch crosshair-color-white"></span><span>白色</span></label>
+                        <label class="crosshair-color-option"><input id="crosshair_slot_1_color_black" name="crosshair_slot_1_color" data-config type="radio" value="black"><span class="crosshair-color-swatch crosshair-color-black"></span><span>黑色</span></label>
+                      </div>
+                    </details>
+                    <details id="crosshair_slot_2" class="crosshair-color-slot">
+                      <summary>
+                        <span>颜色3</span>
+                        <label class="crosshair-slot-enable"><input id="crosshair_slot_2_enabled" data-config type="checkbox">启用</label>
+                      </summary>
+                      <div class="crosshair-slot-options">
+                        <label class="crosshair-color-option"><input id="crosshair_slot_2_color_red" name="crosshair_slot_2_color" data-config type="radio" value="red"><span class="crosshair-color-swatch crosshair-color-red"></span><span>红色</span></label>
+                        <label class="crosshair-color-option"><input id="crosshair_slot_2_color_green" name="crosshair_slot_2_color" data-config type="radio" value="green"><span class="crosshair-color-swatch crosshair-color-green"></span><span>绿色</span></label>
+                        <label class="crosshair-color-option"><input id="crosshair_slot_2_color_blue" name="crosshair_slot_2_color" data-config type="radio" value="blue"><span class="crosshair-color-swatch crosshair-color-blue"></span><span>蓝色</span></label>
+                        <label class="crosshair-color-option"><input id="crosshair_slot_2_color_cyan" name="crosshair_slot_2_color" data-config type="radio" value="cyan"><span class="crosshair-color-swatch crosshair-color-cyan"></span><span>青色</span></label>
+                        <label class="crosshair-color-option"><input id="crosshair_slot_2_color_yellow" name="crosshair_slot_2_color" data-config type="radio" value="yellow"><span class="crosshair-color-swatch crosshair-color-yellow"></span><span>黄色</span></label>
+                        <label class="crosshair-color-option"><input id="crosshair_slot_2_color_white" name="crosshair_slot_2_color" data-config type="radio" value="white"><span class="crosshair-color-swatch crosshair-color-white"></span><span>白色</span></label>
+                        <label class="crosshair-color-option"><input id="crosshair_slot_2_color_black" name="crosshair_slot_2_color" data-config type="radio" value="black"><span class="crosshair-color-swatch crosshair-color-black"></span><span>黑色</span></label>
+                      </div>
+                    </details>
+                  </div>
+                </div>
+              </article>
+            </section>
+          </div>
+        </section>
+
+        <section id="model-page" class="page-card" data-page>
+          <div class="page-head mobile-action-head">
+            <div>
+              <p>模型库</p>
+              <h2>本地模型库</h2>
+            </div>
+            <span id="modelLibrarySummary" class="pill">0 个可用</span>
+          </div>
+
+          <div class="selected-panel">
+            <span>当前模型</span>
+            <strong id="modelCurrentName">尚未选择模型</strong>
+            <small id="modelCurrentMeta">等待模型信息</small>
+          </div>
+
+          <div class="model-library-toolbar">
+            <div class="model-filter-stack">
+              <div id="modelGameFilters" class="model-filter-list" aria-label="模型游戏筛选"></div>
+              <div id="modelBackendFilters" class="model-filter-list model-format-filter-list" aria-label="模型格式筛选"></div>
+            </div>
+            <div class="model-toolbar-actions">
+              <button id="openRemoteConnectButton" class="ghost-button model-import-button" type="button">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h6"/><path d="M14 12h6"/><path d="M10 8v8"/><path d="M14 8v8"/><rect x="2" y="7" width="6" height="10" rx="2"/><rect x="16" y="7" width="6" height="10" rx="2"/></svg>
+                <span>连接远端推理</span>
+              </button>
+              <button id="copyModelDeviceCodeButton" class="ghost-button model-import-button" type="button">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
+                <span>复制设备码</span>
+              </button>
+              <button id="openModelImportButton" class="ghost-button model-import-button" type="button">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+                <span>导入模型</span>
+              </button>
+            </div>
+          </div>
+
+          <div id="modelCardList" class="model-card-list" aria-live="polite"></div>
+          <div id="modelEmptyState" class="model-empty-state" hidden>没有匹配的模型</div>
+
+          <div id="modelImportDialog" class="modal-backdrop" hidden>
+            <div class="modal-card model-import-card" role="dialog" aria-modal="true" aria-labelledby="modelImportTitle">
+              <div class="modal-head">
+                <div>
+                  <p>模型库</p>
+                  <h3 id="modelImportTitle">导入模型</h3>
+                  <small>支持yolo v5 v5u v8 v11 v26</small>
+                </div>
+                <button id="closeModelImportButton" class="icon-button" type="button" aria-label="关闭导入窗口">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                </button>
+              </div>
+              <form id="modelImportForm" class="model-import-form">
+                <div class="import-type-toggle span-all" aria-label="导入模型类型">
+                  <label><input type="radio" name="model_type" value="rknn" checked><span>RKNN</span></label>
+                  <label><input type="radio" name="model_type" value="onnx"><span>ONNX</span></label>
+                  <label><input type="radio" name="model_type" value="hef"><span>HEF</span></label>
+                  <label><input type="radio" name="model_type" value="remote_onnx"><span>远端 ONNX</span></label>
+                </div>
+                <label class="field">模型文件<input id="modelImportFile" type="file" name="file" accept=".rknn,.rknn.enc,.enc,.hef,.hef.enc" required></label>
+                <label class="field">类别标签文件（可选）<input id="modelImportLabelsFile" type="file" name="labels_file" accept=".txt,.labels,.names,.json,.csv"></label>
+                <label class="field">预设参数文件（可选）<input id="modelImportPresetFile" type="file" name="preset_file" accept=".json"></label>
+                <label id="modelCalibrationZipField" class="field" hidden>校准图压缩包（可选）<input id="modelCalibrationZip" type="file" name="calibration_zip" accept=".zip"></label>
+                <div class="field model-import-game-field">
+                  <span>游戏标签</span>
+                  <div id="modelGameCombobox" class="model-game-combobox">
+                    <input id="modelImportGameProfile" type="text" name="game_profile" autocomplete="off" required aria-controls="modelGameSuggestionList" aria-expanded="false" aria-haspopup="listbox">
+                    <button id="modelGameSuggestionToggle" class="model-game-suggestion-toggle" type="button" aria-label="展开已保存游戏标签">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+                    </button>
+                    <div id="modelGameSuggestionList" class="model-game-suggestion-list" role="listbox" hidden></div>
+                  </div>
+                </div>
+                <div id="modelImportHint" class="import-hint span-all" hidden>上传 ONNX 后会自动转换为 RKNN，自定义校准图建议 5-15 张游戏截图即可，若不上传则使用内置校准图进行校准。</div>
+                <div id="modelImportStatus" class="import-status span-all" hidden>转换中...</div>
+                <label class="field span-all">描述<textarea name="description" rows="3" placeholder="输入模型用途、类别说明或适合的场景"></textarea></label>
+                <div class="modal-actions">
+                  <button id="cancelModelImportButton" class="ghost-button" type="button">取消</button>
+                  <button id="submitModelImportButton" class="ghost-button" type="submit">导入</button>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          <div id="remoteConnectDialog" class="modal-backdrop" hidden>
+            <div class="modal-card remote-connect-card" role="dialog" aria-modal="true" aria-labelledby="remoteConnectTitle">
+              <div class="modal-head">
+                <div>
+                  <p>远端模型</p>
+                  <h3 id="remoteConnectTitle">连接 Windows 电脑</h3>
+                  <small>输入同一局域网内 Windows 主机 IP</small>
+                </div>
+                <button id="closeRemoteConnectButton" class="icon-button" type="button" aria-label="关闭远端连接窗口">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                </button>
+              </div>
+              <form id="remoteConnectForm" class="model-import-form">
+                <label class="field span-all">Windows 局域网 IP<input id="remoteHostInput" type="text" name="host" inputmode="decimal" autocomplete="off" placeholder="192.168.1.100" required></label>
+                <div id="remoteConnectError" class="hardware-validation span-all" hidden></div>
+                <div class="modal-actions">
+                  <button id="cancelRemoteConnectButton" class="ghost-button" type="button">取消</button>
+                  <button id="submitRemoteConnectButton" class="ghost-button" type="submit">连接</button>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          <div id="modelClassNamesDialog" class="modal-backdrop" hidden>
+            <div class="modal-card model-class-names-card" role="dialog" aria-modal="true" aria-labelledby="modelClassNamesTitle">
+              <div class="modal-head">
+                <div>
+                  <p>模型类别</p>
+                  <h3 id="modelClassNamesTitle">编辑类别名称</h3>
+                  <small id="modelClassNamesSubtitle">--</small>
+                </div>
+                <button id="closeModelClassNamesButton" class="icon-button" type="button" aria-label="关闭类别编辑窗口">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                </button>
+              </div>
+              <form id="modelClassNamesForm" class="model-class-names-form">
+                <div id="modelClassNamesEditor" class="model-class-names-editor"></div>
+                <div class="modal-actions">
+                  <button id="cancelModelClassNamesButton" class="ghost-button" type="button">取消</button>
+                  <button id="saveModelClassNamesButton" class="ghost-button" type="submit">保存</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </section>
+
+        <section id="wifi-page" class="page-card" data-page>
+          <div class="page-head mobile-action-head">
+            <div>
+              <p>网络连接</p>
+              <h2>网络配置</h2>
+            </div>
+          </div>
+
+          <div class="hardware-grid wifi-page-grid">
+            <article class="module-tile wifi-panel">
+              <div class="module-title">
+                <h3>无线网络</h3>
+                <span id="wifiStatusPill" class="pill">未读取</span>
+              </div>
+              <div class="wifi-mode-tabs" role="group" aria-label="无线模式">
+                <button id="wifiClientModeButton" class="wifi-mode-button is-active" type="button">Wi-Fi</button>
+                <button id="wifiApModeButton" class="wifi-mode-button" type="button">AP 热点</button>
+              </div>
+              <div id="wifiSummary" class="wifi-summary"></div>
+              <div id="wifiClientPanel" class="wifi-mode-panel">
+                <div class="field-grid compact wifi-connect-grid">
+                  <label class="field">Wi-Fi 列表
+                    <select id="wifiNetworkSelect"></select>
+                  </label>
+                  <label class="field">密码
+                    <input id="wifiPassword" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" placeholder="Wi-Fi 密码">
+                  </label>
+                </div>
+                <div class="hardware-actions">
+                  <button id="wifiScanButton" class="ghost-button" type="button">扫描 Wi-Fi</button>
+                  <button id="wifiConnectButton" class="ghost-button" type="button">连接</button>
+                  <button id="wifiFallbackButton" class="ghost-button" type="button">重置默认 Wi-Fi</button>
+                </div>
+                <div id="wifiNetworkList" class="wifi-network-list"></div>
+              </div>
+              <div id="wifiApPanel" class="wifi-mode-panel" hidden>
+                <div id="wifiApSummary" class="wifi-ap-summary"></div>
+                <div class="field-grid compact wifi-connect-grid">
+                  <label class="field">热点名称
+                    <input id="wifiApSsid" type="text" autocomplete="off" maxlength="32" placeholder="{{ default_hotspot_ssid }}">
+                  </label>
+                  <label class="field">热点密码
+                    <input id="wifiApPassword" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" minlength="8" maxlength="63" placeholder="12345678">
+                  </label>
+                </div>
+                <div class="hardware-actions">
+                  <button id="wifiApApplyButton" class="ghost-button" type="button">应用热点</button>
+                  <button id="wifiClientActivateButton" class="ghost-button" type="button">切回 Wi-Fi</button>
+                  <small id="wifiApHint">热点开启后，请连接热点并访问下方显示的热点地址。</small>
+                </div>
+              </div>
+
+              <section class="network-access-panel" aria-label="局域网名称与访问端口">
+                <div class="network-access-fields">
+                  <label class="field">局域网名称
+                    <input id="lanHostnameInput" type="text" autocomplete="off" maxlength="63" placeholder="{{ default_local_name }}">
+                    <span id="lanHostnameHint" class="field-hint">用于路由器设备列表和 .local 访问地址，路由器列表可能要等网络刷新后更新。</span>
+                  </label>
+                  <label class="field">访问端口
+                    <input id="webPortInput" type="number" inputmode="numeric" min="1024" max="65535" step="1" placeholder="8080">
+                    <span id="webPortHint" class="field-hint">修改后 Web 服务会短暂重启，需要用新端口重新打开页面。</span>
+                  </label>
+                </div>
+                <div class="network-access-actions">
+                  <button id="applyNetworkAccessButton" class="ghost-button" type="button">应用网络访问设置</button>
+                </div>
+              </section>
+
+              <section class="network-access-panel lan-blocklist-panel" aria-label="局域网访问黑名单">
+                <div class="module-title compact-title">
+                  <h3>局域网黑名单</h3>
+                  <span id="lanBlockStatusPill" class="pill">未读取</span>
+                </div>
+                <div id="lanBlockSummary" class="wifi-summary"></div>
+                <div class="network-access-fields lan-block-fields">
+                  <label class="field">发现的设备
+                    <select id="lanBlockDeviceSelect"></select>
+                    <span id="lanBlockDeviceHint" class="field-hint">扫描后选择一个设备，应用后该 IP 将无法访问本机。</span>
+                  </label>
+                  <label class="field">手动 IP
+                    <input id="lanBlockIpInput" type="text" inputmode="decimal" autocomplete="off" placeholder="192.168.176.50">
+                    <span class="field-hint">仅支持单个 IPv4，不能填写网段。</span>
+                  </label>
+                </div>
+                <div class="network-access-actions lan-block-actions">
+                  <button id="scanLanDevicesButton" class="ghost-button" type="button">扫描设备</button>
+                  <button id="applyLanBlockButton" class="danger-button" type="button" disabled>拉黑选中 IP</button>
+                  <button id="clearLanBlockButton" class="ghost-button" type="button" disabled>清除黑名单</button>
+                </div>
+              </section>
+            </article>
+          </div>
+        </section>
+
+        <section id="hardware-page" class="page-card" data-page>
+          <div class="page-head mobile-action-head">
+            <div>
+              <p>硬件信息</p>
+              <h2>显示器与鼠标描述</h2>
+            </div>
+            <div class="diagnostic-actions">
+              <button id="downloadUsbDiagnosticsButton" class="ghost-button" type="button">下载USB诊断日志</button>
+              <button id="refreshHardwareButton" class="ghost-button" type="button">刷新硬件</button>
+              <span id="usbDiagnosticsStatus" class="trace-status"></span>
+            </div>
+          </div>
+
+          <div class="hardware-grid">
+            <article class="module-tile">
+              <div class="module-title">
+                <h3>显示器模式</h3>
+                <span id="displayHardwareStatus" class="pill">未读取</span>
+              </div>
+              <input id="display_device" type="hidden" value="auto">
+              <div class="field-grid compact">
+                <label class="check-line"><input id="display_loopout_enabled" type="checkbox"> 环出模式(最高1k 240 2k144)</label>
+                <div class="loopout-overlay-control">
+                  <label class="check-line"><input id="display_loopout_overlay_enabled" type="checkbox"> 显示检测框</label>
+                  <button id="displayLoopoutOverlaySettingsButton" class="class-offset-button loopout-overlay-settings-button" type="button" aria-label="检测框设置" aria-expanded="false" title="检测框设置">
+                    <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6V20a2 2 0 0 1-4 0v-.1a1.65 1.65 0 0 0-1-.6 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-.6-1H4a2 2 0 0 1 0-4h.1a1.65 1.65 0 0 0 .6-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6V4a2 2 0 0 1 4 0v.1a1.65 1.65 0 0 0 1 .6 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.14.33.35.62.6 1H20a2 2 0 0 1 0 4h-.1a1.65 1.65 0 0 0-.5 1Z"/></svg>
+                  </button>
+                  <div id="displayLoopoutOverlaySettingsPopover" class="loopout-overlay-settings-popover" role="dialog" aria-labelledby="displayLoopoutOverlaySettingsTitle" hidden>
+                    <div class="loopout-overlay-settings-head">
+                      <strong id="displayLoopoutOverlaySettingsTitle">检测框设置</strong>
+                      <button id="displayLoopoutOverlaySettingsClose" class="icon-button" type="button" aria-label="关闭检测框设置" title="关闭"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+                    </div>
+                    <div class="loopout-overlay-class-tools">
+                      <span>显示类别</span>
+                      <div><button id="displayLoopoutOverlaySelectAll" class="text-button" type="button">全选</button><button id="displayLoopoutOverlaySelectNone" class="text-button" type="button">清空</button></div>
+                    </div>
+                    <div id="displayLoopoutOverlayClasses" class="loopout-overlay-classes"></div>
+                    <div class="loopout-overlay-settings-grid">
+                      <label class="field">线框粗细<input id="display_loopout_overlay_thickness" type="number" min="1" max="8" step="1" inputmode="numeric"></label>
+                      <label class="check-line"><input id="display_loopout_overlay_use_class_colors" type="checkbox"> 按类别配色</label>
+                      <label class="field loopout-overlay-color-field">统一颜色<input id="display_loopout_overlay_color" type="color" value="#ff5edb"></label>
+                    </div>
+                    <div class="loopout-overlay-settings-actions"><button id="displayLoopoutOverlayCancel" class="ghost-button" type="button">取消</button><button id="displayLoopoutOverlayApply" class="primary-button" type="button">应用</button></div>
+                  </div>
+                </div>
+                <label class="field">首选模式
+                  <select id="display_native_mode">
+                    <option value="">自动使用 EDID 模式</option>
+                    <option value="1080p60">1920x1080 @ 60 Hz</option>
+                    <option value="1080p90">1920x1080 @ 90 Hz</option>
+                    <option value="1080p120">1920x1080 @ 120 Hz</option>
+                    <option value="1080p144">1920x1080 @ 144 Hz</option>
+                    <option value="1080p240">1920x1080 @ 240 Hz</option>
+                    <option value="1440p60">2560x1440 @ 60 Hz</option>
+                    <option value="1440p120">2560x1440 @ 120 Hz</option>
+                    <option value="1440p144">2560x1440 @ 144 Hz</option>
+                    <option value="2160p60">3840x2160 @ 60 Hz</option>
+                  </select>
+                  <span class="field-hint">建议按照主显示器的分辨率和刷新率设置；不确定时保持自动。</span>
+                </label>
+                <label class="check-line"><input id="display_native_only" type="checkbox"> 仅输出首选模式</label>
+                <label class="field">环出颜色格式
+                  <select id="display_loopout_pixel_format">
+                    <option value="rgb888">RGB888 / RG24</option>
+                    <option value="bgr888">BGR888 / BG24</option>
+                  </select>
+                  <span class="field-hint">默认 RGB888；若颜色异常或黑屏可切换后保存。</span>
+                </label>
+                <label class="field display-identity-field">显示器名称<input id="display_name" type="text" maxlength="13" autocomplete="off"><span class="field-hint">1-13 个英文/数字/符号</span></label>
+                <label class="field display-identity-field">厂商代码<input id="display_vendor" type="text" maxlength="3" autocomplete="off"><span class="field-hint">3 个大写英文字母</span></label>
+                <label class="field display-identity-field">产品 ID<input id="display_product_id" type="text" placeholder="0x3588" autocomplete="off"><span class="field-hint">0x0001-0xffff</span></label>
+                <label class="field display-identity-field">序列号<input id="display_serial" type="text" placeholder="0x20260414" autocomplete="off"><span class="field-hint">0x00000001-0xffffffff</span></label>
+              </div>
+              <div id="displayHardwareValidation" class="hardware-validation" hidden></div>
+              <div id="displayModeSummary" class="display-mode-summary" hidden></div>
+              <div class="hardware-actions">
+                <button id="randomDisplayHardwareButton" class="ghost-button" type="button">随机身份</button>
+                <button id="addDisplayEdidModeButton" class="ghost-button" type="button">新增EDID模式</button>
+                <button id="saveDisplayHardwareButton" class="ghost-button" type="button">保存并应用</button>
+                <small>不会重启设备；Windows 端可能需要重新检测 HDMI。</small>
+              </div>
+              <pre id="displayHardwareLog" class="hardware-log">等待读取</pre>
+            </article>
+
+            <article class="module-tile">
+              <div class="module-title">
+                <h3>USB 鼠标硬件信息</h3>
+                <span id="mouseHardwareStatus" class="pill">未读取</span>
+              </div>
+              <div class="hardware-mode-toggle" aria-label="USB 鼠标模式">
+                <label><input type="radio" name="mouse_proxy_mode" value="full_passthrough" checked><span>完整透传</span></label>
+                <label><input type="radio" name="mouse_proxy_mode" value="synthetic"><span>合成模式</span></label>
+              </div>
+              <div class="field-grid compact" aria-label="USB 鼠标重连等待时间">
+                <label class="field">普通启动等待 秒<input id="mouse_settle_delay_sec" type="number" min="0" max="30" step="0.1" inputmode="decimal" placeholder="1"><span class="field-hint">首次启动或相同 VID/PID 重连前等待。</span></label>
+                <label class="field">身份切换等待 秒<input id="mouse_identity_change_settle_delay_sec" type="number" min="0" max="30" step="0.1" inputmode="decimal" placeholder="0.5"><span class="field-hint">VID/PID 变化后启动新透传的等待时间。</span></label>
+              </div>
+              <div class="field-grid compact">
+                <label class="field">VID<input id="mouse_usb_vid" type="text" placeholder="0x046d" autocomplete="off"><span class="field-hint">0x0001-0xffff</span></label>
+                <label class="field">PID<input id="mouse_usb_pid" type="text" placeholder="0xc077" autocomplete="off"><span class="field-hint">0x0001-0xffff</span></label>
+                <label class="field">制造商<input id="mouse_usb_manufacturer" type="text" autocomplete="off"><span class="field-hint">1-48 个英文/数字/符号</span></label>
+                <label class="field">产品名<input id="mouse_usb_product" type="text" autocomplete="off"><span class="field-hint">1-64 个英文/数字/符号</span></label>
+                <label class="field">序列号<input id="mouse_usb_serial" type="text" autocomplete="off"><span class="field-hint">1-64 个英文/数字/符号</span></label>
+                <label class="field">配置名<input id="mouse_usb_configuration" type="text" autocomplete="off"><span class="field-hint">1-32 个英文/数字/符号</span></label>
+                <label class="field">USB 版本<input id="mouse_usb_bcd_usb" type="text" placeholder="0x0200" readonly></label>
+                <label class="field">设备版本<input id="mouse_usb_bcd_device" type="text" placeholder="0x0100" readonly></label>
+                <label class="field">设备类<input id="mouse_usb_device_class" type="number" min="0" max="255" step="1" readonly></label>
+                <label class="field">设备子类<input id="mouse_usb_device_subclass" type="number" min="0" max="255" step="1" readonly></label>
+                <label class="field">设备协议<input id="mouse_usb_device_protocol" type="number" min="0" max="255" step="1" readonly></label>
+                <label class="field">最大电流 mA<input id="mouse_usb_max_power" type="number" min="0" max="500" step="1" readonly></label>
+                <label class="field">HID 协议<input id="mouse_hid_protocol" type="number" min="0" max="255" step="1" readonly></label>
+                <label class="field">HID 子类<input id="mouse_hid_subclass" type="number" min="0" max="255" step="1" readonly></label>
+                <label class="field">报告长度<input id="mouse_hid_report_length" type="number" min="1" max="64" step="1" readonly></label>
+                <label class="field">轮询间隔<input id="mouse_hid_interval" type="number" min="1" max="16" step="1" readonly></label>
+                <label class="field span-all">HID 报告描述符<textarea id="mouse_hid_report_desc_hex" rows="3" spellcheck="false" readonly></textarea></label>
+              </div>
+              <div id="mouseHardwareValidation" class="hardware-validation" hidden></div>
+              <div class="hardware-actions">
+                <button id="saveMouseProxyTimingButton" class="ghost-button" type="button">保存等待时间</button>
+                <button id="randomMouseHardwareButton" class="ghost-button" type="button">随机身份</button>
+                <button id="saveMouseHardwareButton" class="ghost-button" type="button">保存并应用</button>
+                <small id="mouseHardwareModeHint">完整透传使用真实鼠标硬件信息，合成模式可自定义身份。</small>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section id="hailo-page" class="page-card" data-page hidden>
+          <div class="page-head mobile-action-head">
+            <div>
+              <p>Hailo-8加速</p>
+              <h2>PCIe 加速后端</h2>
+            </div>
+            <span id="hailoReadyPill" class="pill">未检测</span>
+          </div>
+          <div class="hardware-grid hailo-page-grid">
+            <article class="module-tile">
+              <div class="module-title">
+                <h3>设备状态</h3>
+                <button id="refreshHailoButton" class="ghost-button" type="button">刷新状态</button>
+              </div>
+              <div class="hailo-status-grid" id="hailoStatusGrid">
+                <div>
+                  <span>PCIe 插卡</span>
+                  <strong id="hailoPcieValue">--</strong>
+                </div>
+                <div>
+                  <span>内核驱动</span>
+                  <strong id="hailoDriverValue">--</strong>
+                </div>
+                <div>
+                  <span>HailoRT</span>
+                  <strong id="hailoRuntimeValue">--</strong>
+                </div>
+                <div>
+                  <span>设备扫描</span>
+                  <strong id="hailoScanValue">--</strong>
+                </div>
+                <div>
+                  <span>当前内核</span>
+                  <strong id="hailoKernelValue">--</strong>
+                </div>
+                <div>
+                  <span>芯片温度</span>
+                  <strong id="hailoTemperatureValue">--</strong>
+                </div>
+              </div>
+            </article>
+
+            <article class="module-tile">
+              <div class="module-title">
+                <h3>依赖安装</h3>
+                <span id="hailoInstallStage" class="pill">空闲</span>
+              </div>
+              <div class="hailo-install-actions">
+                <button id="installHailoButton" class="ghost-button" type="button" disabled>安装 Hailo-8 依赖</button>
+                <small id="hailoInstallHint">检测到 Hailo-8 PCIe 设备后可安装驱动和 HailoRT。</small>
+              </div>
+              <div id="hailoInstallProgress" class="update-progress-panel" hidden>
+                <div class="update-progress-head">
+                  <strong id="hailoInstallMessage">准备中</strong>
+                  <span id="hailoInstallPercent">0%</span>
+                </div>
+                <div class="update-progress-track"><span id="hailoInstallProgressBar" style="width: 0%"></span></div>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section id="kmbox-page" class="page-card" data-page hidden>
+          <div class="page-head mobile-action-head">
+            <div>
+              <p>外接键鼠盒子</p>
+              <h2>键鼠盒子</h2>
+            </div>
+            <div class="external-mouse-head-actions">
+              <button id="testMouseCircleButton" class="ghost-button" type="button">测试画圈</button>
+              <span id="kmboxStatus" class="pill">未启用</span>
+            </div>
+          </div>
+
+          <div class="hardware-grid kmbox-grid">
+            <article class="module-tile external-mouse-card" data-kmbox-card>
+              <div class="module-title">
+                <h3>kmboxNet 网络协议</h3>
+                <label class="switch" aria-label="启用 kmboxNet 网络协议">
+                  <input id="kmbox_enabled" type="checkbox">
+                  <span></span>
+                </label>
+              </div>
+              <div class="external-mouse-body" data-kmbox-body>
+                <div class="field-grid compact">
+                  <label class="field">盒子 IP<input id="kmbox_ip" type="text" inputmode="decimal" autocomplete="off" placeholder="192.168.2.188"><span class="field-hint">填写盒子屏幕显示的 IP 地址。</span></label>
+                  <label class="field">通信端口<input id="kmbox_port" type="number" min="1" max="65535" step="1" placeholder="1282"><span class="field-hint">填写盒子屏幕显示的 UDP 端口。</span></label>
+                  <label class="field">UUID<input id="kmbox_uuid" type="text" maxlength="8" autocomplete="off" placeholder="AF425414"><span class="field-hint">8 位十六进制 UUID。</span></label>
+                  <label class="field">监听端口<input id="kmbox_monitor_port" type="number" min="0" max="65535" step="1" placeholder="5001"><span class="field-hint">开发板本地 UDP 端口；填 0 可关闭物理按键监听。</span></label>
+                  <label class="field">响应超时 ms<input id="kmbox_timeout_ms" type="number" min="50" max="3000" step="10" placeholder="300"><span class="field-hint">连接和命令等待盒子响应的时间。</span></label>
+                  <label class="check-line"><input id="kmbox_encrypted" type="checkbox"> 使用加密命令</label>
+                </div>
+                <div id="kmboxValidation" class="hardware-validation" hidden></div>
+                <div class="hardware-actions">
+                  <button id="saveKmboxButton" class="ghost-button" type="button">保存配置</button>
+                  <small id="kmboxRuntimeHint">保存后会自动尝试连接。</small>
+                </div>
+              </div>
+            </article>
+
+            <article class="module-tile external-mouse-card" data-catnet-card>
+              <div class="module-title">
+                <h3>CatNet 网络协议</h3>
+                <span id="catnetStatus" class="pill">未启用</span>
+                <label class="switch" aria-label="启用 CatNet 网络协议">
+                  <input id="catnet_enabled" type="checkbox">
+                  <span></span>
+                </label>
+              </div>
+              <div class="external-mouse-body" data-catnet-body>
+                <div class="field-grid compact">
+                  <label class="field">盒子 IP<input id="catnet_ip" type="text" inputmode="decimal" autocomplete="off" placeholder="192.168.7.1"><span class="field-hint">Cat 盒子 USB 网卡地址，通常为 192.168.7.1。</span></label>
+                  <label class="field">通信端口<input id="catnet_port" type="number" min="1" max="65535" step="1" placeholder="8888"><span class="field-hint">Cat 协议 UDP 端口，通常为 8888。</span></label>
+                  <label class="field">UUID<input id="catnet_uuid" type="text" maxlength="8" autocomplete="off" placeholder="2FE8DBB0"><span class="field-hint">8 位十六进制 UUID。</span></label>
+                  <label class="field">监听端口<input id="catnet_monitor_port" type="number" min="0" max="65535" step="1" placeholder="1234"><span class="field-hint">开发板本地 UDP 端口；填 0 可关闭物理按键监听。</span></label>
+                  <label class="field">响应超时 ms<input id="catnet_timeout_ms" type="number" min="50" max="3000" step="10" placeholder="300"><span class="field-hint">连接和命令等待盒子响应的时间。</span></label>
+                </div>
+                <div id="catnetValidation" class="hardware-validation" hidden></div>
+                <div class="hardware-actions">
+                  <button id="saveCatnetButton" class="ghost-button" type="button">保存配置</button>
+                  <small id="catnetRuntimeHint">保存后会自动尝试连接。</small>
+                </div>
+              </div>
+            </article>
+
+            <article class="module-tile external-mouse-card" data-makcu-card>
+              <div class="module-title">
+                <h3>MAKCU 串口控制器</h3>
+                <span id="makcuStatus" class="pill">未启用</span>
+                <label class="switch" aria-label="启用 MAKCU 串口控制器">
+                  <input id="makcu_enabled" type="checkbox">
+                  <span></span>
+                </label>
+              </div>
+              <div class="external-mouse-body" data-makcu-body>
+                <div class="field-grid compact">
+                  <label class="field">串口<select id="makcu_port"></select><span class="field-hint">自动选择只会匹配 MAKCU/CH34x 特征设备。</span></label>
+                  <label class="check-line"><input id="makcu_high_speed" type="checkbox"> 高速模式 4Mbps</label>
+                </div>
+                <div id="makcuValidation" class="hardware-validation" hidden></div>
+                <div class="hardware-actions">
+                  <button id="refreshMakcuDevicesButton" class="ghost-button" type="button">刷新串口</button>
+                  <button id="saveMakcuButton" class="ghost-button" type="button">保存配置</button>
+                  <small id="makcuRuntimeHint">保存后会自动尝试连接。</small>
+                </div>
+              </div>
+            </article>
+
+            <article class="module-tile external-mouse-card" data-ferrum-card>
+              <div class="module-title">
+                <h3>Ferrum Legacy 串口</h3>
+                <span id="ferrumStatus" class="pill">未启用</span>
+                <label class="switch" aria-label="启用 Ferrum Legacy 串口">
+                  <input id="ferrum_enabled" type="checkbox">
+                  <span></span>
+                </label>
+              </div>
+              <div class="external-mouse-body" data-ferrum-body>
+                <div class="field-grid compact">
+                  <label class="field">串口<select id="ferrum_port"></select><span class="field-hint">自动优先选择 CP210x / Silicon Labs 设备，连接后切换到 3Mbps。</span></label>
+                </div>
+                <div id="ferrumValidation" class="hardware-validation" hidden></div>
+                <div class="hardware-actions">
+                  <button id="refreshFerrumDevicesButton" class="ghost-button" type="button">刷新串口</button>
+                  <button id="saveFerrumButton" class="ghost-button" type="button">保存配置</button>
+                  <small id="ferrumRuntimeHint">保存后会自动尝试连接。</small>
+                </div>
+              </div>
+            </article>
+
+            <article class="module-tile external-mouse-card" data-kmboxb-card>
+              <div class="module-title">
+                <h3>kmbox B+ 串口</h3>
+                <span id="kmboxbStatus" class="pill">未启用</span>
+                <label class="switch" aria-label="启用 kmbox B+ 串口">
+                  <input id="kmboxb_enabled" type="checkbox">
+                  <span></span>
+                </label>
+              </div>
+              <div class="external-mouse-body" data-kmboxb-body>
+                <div class="field-grid compact">
+                  <label class="field">串口<select id="kmboxb_port"></select><span class="field-hint">自动模式只尝试 CH340/CH341/CH34x，并通过 km.version() 确认盒子。</span></label>
+                </div>
+                <div id="kmboxbValidation" class="hardware-validation" hidden></div>
+                <div class="hardware-actions">
+                  <button id="refreshKmboxbDevicesButton" class="ghost-button" type="button">刷新串口</button>
+                  <button id="saveKmboxbButton" class="ghost-button" type="button">保存配置</button>
+                  <small id="kmboxbRuntimeHint">固定使用官方默认 115200 波特率。</small>
+                </div>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section id="preset-page" class="page-card" data-page>
+          <div class="page-head mobile-action-head">
+            <div>
+              <p>预设参数</p>
+              <h2>预设参数</h2>
+            </div>
+            <div class="preset-head-actions">
+              <span id="presetLibrarySummary" class="pill">暂无预设参数</span>
+              <button id="cleanupUnusedPresetsButton" class="ghost-button preset-clean-button" type="button" disabled>清理未使用预设</button>
+              <button id="openPresetImportButton" class="ghost-button preset-import-button" type="button">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+                <span>导入预设</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="model-actions preset-save-actions">
+            <label class="field">新预设参数名称<input id="presetName" type="text"></label>
+            <button id="savePresetButton" class="ghost-button" type="button">保存预设参数</button>
+          </div>
+
+          <div class="selected-panel">
+            <span>当前自动保存目标</span>
+            <strong id="presetCurrentMeta">暂无</strong>
+          </div>
+
+          <div id="presetCardList" class="preset-card-list" aria-live="polite"></div>
+          <div id="presetEmptyState" class="model-empty-state" hidden>暂无预设参数</div>
+
+          <div id="presetImportDialog" class="modal-backdrop" hidden>
+            <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="presetImportTitle">
+              <div class="modal-head">
+                <div>
+                  <p>预设参数</p>
+                  <h3 id="presetImportTitle">导入预设</h3>
+                </div>
+                <button id="closePresetImportButton" class="icon-button" type="button" aria-label="关闭导入窗口">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                </button>
+              </div>
+              <form id="presetImportForm" class="model-import-form preset-import-form">
+                <label class="field span-all">预设文件<input id="presetImportFile" type="file" name="file" accept=".json" required></label>
+                <label class="field span-all">导入后名称<input id="presetImportName" type="text" name="name" placeholder="留空使用文件名"></label>
+                <div class="modal-actions">
+                  <button id="cancelPresetImportButton" class="ghost-button" type="button">取消</button>
+                  <button id="submitPresetImportButton" class="ghost-button" type="submit">导入</button>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          <div id="presetRenameDialog" class="modal-backdrop" hidden>
+            <div class="modal-card preset-rename-modal" role="dialog" aria-modal="true" aria-labelledby="presetRenameTitle">
+              <div class="modal-head">
+                <div>
+                  <p>预设参数</p>
+                  <h3 id="presetRenameTitle">重命名预设</h3>
+                </div>
+                <button id="closePresetRenameButton" class="icon-button" type="button" aria-label="关闭重命名窗口">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                </button>
+              </div>
+              <form id="presetRenameForm" class="model-import-form preset-rename-form">
+                <label class="field span-all">预设名称<input id="presetRenameName" type="text" maxlength="120" autocomplete="off" required></label>
+                <div class="modal-actions">
+                  <button id="cancelPresetRenameButton" class="ghost-button" type="button">取消</button>
+                  <button id="submitPresetRenameButton" class="primary-button" type="submit">保存</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </section>
+
+        {% if ui_brand == "yu" %}
+        <section id="theme-store-page" class="page-card" data-page hidden>
+          <div class="page-head mobile-action-head">
+            <div>
+              <p>视觉主题</p>
+              <h2>主题商店</h2>
+            </div>
+            <div class="theme-store-head-actions">
+              <a id="purchaseThemesButton" class="button-link theme-purchase-button" target="_blank" rel="noopener noreferrer" hidden>去购买</a>
+              <button id="refreshThemesButton" class="ghost-button" type="button">刷新主题</button>
+            </div>
+          </div>
+          <div id="themeStoreStatus" class="theme-store-status" role="status">正在读取主题目录</div>
+          <div id="themeCardList" class="theme-card-list" aria-live="polite"></div>
+        </section>
+
+        <div id="themePreviewDialog" class="modal-backdrop" hidden>
+          <div class="modal-card theme-preview-modal" role="dialog" aria-modal="true" aria-labelledby="themePreviewTitle">
+            <div class="modal-head">
+              <div><p>主题预览</p><h3 id="themePreviewTitle">主题预览</h3></div>
+              <button id="closeThemePreviewButton" class="icon-button" type="button" aria-label="关闭预览">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+              </button>
+            </div>
+            <div id="themePreviewList" class="theme-preview-list"></div>
+          </div>
+        </div>
+        {% endif %}
+
+        <section id="license-page" class="page-card" data-page>
+          <div class="page-head mobile-action-head">
+            <div>
+              <p>系统设置</p>
+              <h2>系统设置</h2>
+            </div>
+            <span id="licenseStatusPill" class="pill">未读取</span>
+          </div>
+
+          <div class="license-grid">
+            <article class="module-tile">
+              <div class="module-title">
+                <h3>设备授权</h3>
+                <span id="licensePlan" class="pill">永久授权</span>
+              </div>
+              <div id="licenseSummary" class="license-summary"></div>
+              <div class="hardware-actions license-actions">
+                <button id="reactivateDeviceButton" class="danger-button" type="button">授权修复</button>
+              </div>
+            </article>
+
+            <article class="module-tile">
+              <div class="module-title">
+                <h3>存储容量</h3>
+                <span id="storageExpandPill" class="pill">未读取</span>
+              </div>
+              <div id="storageExpandSummary" class="license-summary"></div>
+              <div class="hardware-actions">
+                <button id="expandStorageButton" class="danger-button" type="button" disabled>扩容存储</button>
+                <button id="refreshStorageButton" class="ghost-button" type="button">刷新容量</button>
+              </div>
+              <pre id="storageExpandLog" class="hardware-log">暂无扩容信息</pre>
+            </article>
+
+            <article class="module-tile">
+              <div class="module-title">
+                <h3>系统信息</h3>
+                <span id="systemInfoPill" class="pill">已加载</span>
+              </div>
+              <div class="license-summary" id="systemInfoSummary">
+                <div class="hailo-status-grid">
+                  <div><span>产品</span><strong id="sysProduct">TTBOX</strong></div>
+                  <div><span>版本</span><strong id="sysVersion">--</strong></div>
+                  <div><span>构建</span><strong id="sysBuild">--</strong></div>
+                  <div><span>硬件</span><strong id="sysHardware">--</strong></div>
+                  <div><span>通道</span><strong id="sysChannel">--</strong></div>
+                </div>
+              </div>
+            </article>
+
+            <article class="module-tile">
+              <div class="module-title">
+                <h3>重启与关机</h3>
+              </div>
+              <div class="hardware-actions">
+                <button id="rebootSystemButton2" class="ghost-button" type="button">重启设备</button>
+                <button id="poweroffSystemButton2" class="danger-button" type="button">关机</button>
+              </div>
+            </article>
+
+            {% if ui_brand == "yu" %}
+            <article id="fan-page" class="module-tile fan-system-card">
+              <div class="module-title">
+                <h3>风扇控制</h3>
+                <span id="fanControlPill" class="pill">未检测到PWM接口</span>
+              </div>
+              <div class="fan-system-layout">
+                <section class="fan-system-control" aria-label="风扇设置">
+                  <div class="fan-system-section-head">
+                    <strong>全速运行</strong>
+                    <label class="switch"><input id="fan_control_enabled" data-config type="checkbox"><span></span></label>
+                  </div>
+                  <label class="field">温度来源
+                    <select id="fan_control_temperature_source" data-config>
+                      <option value="auto">自动</option>
+                      <option value="soc">RK3588 SoC</option>
+                      <option value="cpu_big">CPU 大核</option>
+                      <option value="gpu">GPU</option>
+                      <option value="npu">NPU</option>
+                      <option value="hailo">Hailo-8</option>
+                    </select>
+                  </label>
+                </section>
+                <section class="fan-system-runtime" aria-label="风扇运行状态">
+                  <div class="fan-system-section-head">
+                    <strong>运行状态</strong>
+                    <span id="fanRuntimeMode" class="pill">待机</span>
+                  </div>
+                  <div class="hailo-status-grid fan-status-grid">
+                    <div><span>PWM 控制接口</span><strong id="fanControlAvailableValue">--</strong></div>
+                    <div><span>温度来源</span><strong id="fanTemperatureSourceValue">--</strong></div>
+                    <div><span>当前温度</span><strong id="fanTemperatureValue">--</strong></div>
+                    <div><span>当前风量</span><strong id="fanPwmValue">--</strong></div>
+                    <div><span>转速反馈</span><strong id="fanRpmValue">--</strong></div>
+                    <div><span>状态</span><strong id="fanErrorValue">--</strong></div>
+                  </div>
+                </section>
+              </div>
+            </article>
+            {% endif %}
+          </div>
+        </section>
+
+        <section id="update-page" class="page-card" data-page>
+          <div class="page-head mobile-action-head">
+            <div>
+              <p>系统更新</p>
+              <h2>系统更新</h2>
+            </div>
+            <span id="updateStatusPill" class="pill">待检查</span>
+          </div>
+
+          <div class="license-grid">
+            <article class="module-tile">
+              <div class="module-title">
+                <h3>当前版本</h3>
+                <span id="updateCurrentVersionPill" class="pill">--</span>
+              </div>
+              <div class="license-summary">
+                <div class="hailo-status-grid">
+                  <div><span>产品</span><strong id="updateProduct">TTBOX</strong></div>
+                  <div><span>版本</span><strong id="updateCurrentVersion">--</strong></div>
+                  <div><span>构建</span><strong id="updateBuild">--</strong></div>
+                  <div><span>通道</span><strong id="updateChannel">--</strong></div>
+                </div>
+              </div>
+            </article>
+
+            <article class="module-tile">
+              <div class="module-title">
+                <h3>检查更新</h3>
+                <span id="updateLatestPill" class="pill">--</span>
+              </div>
+              <div class="hardware-actions">
+                <button id="updateCheckButton" class="ghost-button" type="button">检查更新</button>
+                <button id="updateInstallButton" class="danger-button" type="button" disabled>安装更新</button>
+                <button id="updateRollbackButton" class="ghost-button" type="button" disabled>回滚</button>
+                <button id="updateScanOtgButton" class="ghost-button" type="button">扫描USB更新</button>
+              </div>
+              <div id="updateProgressPanel" class="update-progress-panel">
+                <div class="update-progress-head">
+                  <span id="updateProgressLabel">等待操作</span>
+                  <strong id="updateProgressPercent">--</strong>
+                </div>
+                <div class="setup-progress-track update-progress-track" aria-hidden="true">
+                  <span id="updateProgressBar" style="width: 0%"></span>
+                </div>
+                <p id="updateProgressMessage" class="setup-message">点击检查更新开始。</p>
+              </div>
+              <pre id="updateReleaseNotes" class="hardware-log">暂无更新信息</pre>
+              <div id="updateEngineStatus" class="license-summary">
+                <div class="hailo-status-grid">
+                  <div><span>更新状态</span><strong id="updateEngineState">--</strong></div>
+                  <div><span>错误信息</span><strong id="updateEngineError">--</strong></div>
+                </div>
+              </div>
+            </article>
+
+            <article class="module-tile">
+              <div class="module-title">
+                <h3>关于</h3>
+              </div>
+              <div class="license-summary">
+                <p>TTBOX 更新系统 v0.1.0</p>
+                <p>支持 OTA（网络）和 OTG（USB）两种更新方式。</p>
+                <p>更新包经过 SHA256 校验和 Ed25519 数字签名验证。</p>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        {% if ui_brand == "xh" %}
+        <section id="fan-page" class="page-card" data-page>
+          <div class="page-head mobile-action-head">
+            <div>
+              <p>风扇控制</p>
+              <h2>风扇控制</h2>
+            </div>
+            <span id="fanControlPill" class="pill">未检测到PWM接口</span>
+          </div>
+
+          <div class="hardware-grid fan-page-grid">
+            <article class="module-tile">
+              <div class="module-title">
+                <h3>全速运行</h3>
+                <label class="switch"><input id="fan_control_enabled" data-config type="checkbox"><span></span></label>
+              </div>
+              <div class="field-grid compact fan-control-grid">
+                <label class="field">温度来源
+                  <select id="fan_control_temperature_source" data-config>
+                    <option value="auto">自动</option>
+                    <option value="soc">RK3588 SoC</option>
+                    <option value="cpu_big">CPU 大核</option>
+                    <option value="gpu">GPU</option>
+                    <option value="npu">NPU</option>
+                    <option value="hailo">Hailo-8</option>
+                  </select>
+                </label>
+              </div>
+            </article>
+
+            <article class="module-tile">
+              <div class="module-title">
+                <h3>运行状态</h3>
+                <span id="fanRuntimeMode" class="pill">待机</span>
+              </div>
+              <div class="hailo-status-grid fan-status-grid">
+                <div>
+                  <span>PWM 控制接口</span>
+                  <strong id="fanControlAvailableValue">--</strong>
+                </div>
+                <div>
+                  <span>温度来源</span>
+                  <strong id="fanTemperatureSourceValue">--</strong>
+                </div>
+                <div>
+                  <span>当前温度</span>
+                  <strong id="fanTemperatureValue">--</strong>
+                </div>
+                <div>
+                  <span>当前风量</span>
+                  <strong id="fanPwmValue">--</strong>
+                </div>
+                <div>
+                  <span>转速反馈</span>
+                  <strong id="fanRpmValue">--</strong>
+                </div>
+                <div>
+                  <span>状态</span>
+                  <strong id="fanErrorValue">--</strong>
+                </div>
+              </div>
+            </article>
+          </div>
+        </section>
+        {% endif %}
+      </main>
+    </div>
+
+    <div id="autoBackFlickClassDialog" class="modal-backdrop" hidden>
+      <div class="modal-card auto-back-flick-class-dialog" role="dialog" aria-modal="true" aria-labelledby="autoBackFlickClassDialogTitle">
+        <div class="modal-head">
+          <div>
+            <p>自动背闪</p>
+            <h3 id="autoBackFlickClassDialogTitle">类别参数</h3>
+            <small id="autoBackFlickClassDialogSubtitle">--</small>
+          </div>
+          <button id="closeAutoBackFlickClassDialogButton" class="icon-button" type="button" aria-label="关闭类别参数">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <form id="autoBackFlickClassForm">
+          <div class="auto-back-flick-direction-grid">
+            <label class="inline-checkbox"><input id="autoBackFlickClassRandomDirection" type="checkbox">随机方向</label>
+            <label class="inline-checkbox"><input id="autoBackFlickClassDodgeAway" type="checkbox">根据检测目标位置反向闪避</label>
+          </div>
+          <div class="field-grid compact auto-back-flick-settings-grid">
+            <label class="field">延迟触发 ms<input id="autoBackFlickClassTriggerDelay" type="number" min="0" max="5000" step="10" required><input id="autoBackFlickClassTriggerDelayRange" class="value-range" type="range" min="0" max="5000" step="10"><span class="field-hint">目标持续满足条件多久后触发；目标消失或切换后重新计时。</span></label>
+            <label class="field">置信度<input id="autoBackFlickClassConfidence" type="number" min="0" max="1" step="0.01" required><input id="autoBackFlickClassConfidenceRange" class="value-range" type="range" min="0" max="1" step="0.01"><span class="field-hint">该类别触发所需的最低检测置信度。</span></label>
+            <label class="field">转身像素<input id="autoBackFlickClassTurnPixels" type="number" min="-20000" max="20000" step="10" required><input id="autoBackFlickClassTurnPixelsRange" class="value-range" type="range" min="-20000" max="20000" step="10"><span class="field-hint">背闪时横向移动距离；正值向右，负值向左。</span></label>
+            <label class="field">停顿 ms<input id="autoBackFlickClassWait" type="number" min="0" max="2000" step="10" required><input id="autoBackFlickClassWaitRange" class="value-range" type="range" min="0" max="2000" step="10"><span class="field-hint">转身完成后等待多久再回正。</span></label>
+            <label class="field">平滑步数<input id="autoBackFlickClassSteps" type="number" min="1" max="300" step="1" required><input id="autoBackFlickClassStepsRange" class="value-range" type="range" min="1" max="300" step="1"><span class="field-hint">把转身和回正拆成多少步，低一点更快，高一点更平滑。</span></label>
+            <label class="field">冷却 ms<input id="autoBackFlickClassCooldown" type="number" min="500" max="10000" step="100" required><input id="autoBackFlickClassCooldownRange" class="value-range" type="range" min="500" max="10000" step="100"><span class="field-hint">该类别完成一次背闪后，至少等待多久才允许再次触发。</span></label>
+            <label class="field">转身随机<input id="autoBackFlickClassTurnRandom" type="number" min="0" max="1000" step="1" required><input id="autoBackFlickClassTurnRandomRange" class="value-range" type="range" min="0" max="1000" step="1"><span class="field-hint">转身距离附加的随机像素范围。</span></label>
+            <label class="field">回正随机<input id="autoBackFlickClassReturnRandom" type="number" min="0" max="1000" step="1" required><input id="autoBackFlickClassReturnRandomRange" class="value-range" type="range" min="0" max="1000" step="1"><span class="field-hint">回正距离附加的随机像素范围。</span></label>
+          </div>
+          <div class="modal-actions">
+            <button id="cancelAutoBackFlickClassDialogButton" class="ghost-button" type="button">取消</button>
+            <button class="primary-button" type="submit">保存</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div id="autoCalibrationConfirmDialog" class="modal-backdrop" hidden>
+      <div class="modal-card auto-calibration-dialog" role="dialog" aria-modal="true" aria-labelledby="autoCalibrationConfirmTitle">
+        <div class="modal-head">
+          <div><p>移动控制</p><h3 id="autoCalibrationConfirmTitle">开始自动标定</h3></div>
+          <button id="closeAutoCalibrationConfirmButton" class="icon-button" type="button" aria-label="关闭">×</button>
+        </div>
+        <p class="auto-calibration-warning">标定过程约需 5–6 秒，系统会自动进行水平往返移动。期间请保持目标完整可见、游戏视角和物理鼠标静止，切勿移动、点击鼠标或切换视角；目标丢失或发生异常时标定将自动中止。</p>
+        <div class="modal-actions">
+          <button id="cancelAutoCalibrationConfirmButton" class="ghost-button" type="button">取消</button>
+          <button id="confirmAutoCalibrationButton" class="primary-button" type="button">开始标定</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="physicalButtonBlockDialog" class="modal-backdrop" hidden>
+      <div class="modal-card physical-button-block-card" role="dialog" aria-modal="true" aria-labelledby="physicalButtonBlockTitle">
+        <div class="modal-head">
+          <div>
+            <p>热键控制</p>
+            <h3 id="physicalButtonBlockTitle">屏蔽物理按键</h3>
+          </div>
+          <button id="closePhysicalButtonBlockButton" class="icon-button" type="button" aria-label="关闭屏蔽物理按键窗口">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <div class="physical-button-block-add">
+          <label class="field">物理按键<select id="physicalButtonBlockSelect"></select></label>
+          <button id="addPhysicalButtonBlockButton" class="ghost-button" type="button">新增按键</button>
+        </div>
+        <div id="physicalButtonBlockList" class="physical-button-block-list"></div>
+        <p id="physicalButtonBlockEmpty" class="physical-button-block-empty">尚未屏蔽物理按键</p>
+        <div class="modal-actions">
+          <button id="cancelPhysicalButtonBlockButton" class="ghost-button" type="button">取消</button>
+          <button id="savePhysicalButtonBlockButton" class="primary-button" type="button">保存</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="displayEdidModeDialog" class="modal-backdrop" hidden>
+      <div class="modal-card display-edid-mode-card" role="dialog" aria-modal="true" aria-labelledby="displayEdidModeTitle">
+        <div class="modal-head">
+          <div>
+            <p>显示器模式</p>
+            <h3 id="displayEdidModeTitle">新增EDID模式</h3>
+            <small>按 HDMI 2.0 RX 600 MHz 像素时钟上限计算</small>
+          </div>
+          <button id="closeDisplayEdidModeButton" class="icon-button" type="button" aria-label="关闭新增EDID模式窗口">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <form id="displayEdidModeForm" class="display-edid-mode-form">
+          <div class="display-edid-mode-grid">
+            <label class="field">宽度像素<input id="displayEdidModeWidth" type="number" min="640" max="4095" step="1" inputmode="numeric" autocomplete="off"></label>
+            <label class="field">高度像素<input id="displayEdidModeHeight" type="number" min="400" max="4095" step="1" inputmode="numeric" autocomplete="off"></label>
+            <label class="field">刷新率 Hz<input id="displayEdidModeRefresh" type="number" min="24" max="360" step="1" inputmode="numeric" autocomplete="off"></label>
+          </div>
+          <div id="displayEdidModeStatus" class="display-edid-mode-status" aria-live="polite"></div>
+          <div class="modal-actions">
+            <button id="cancelDisplayEdidModeButton" class="ghost-button" type="button">取消</button>
+            <button id="saveDisplayEdidModeButton" class="ghost-button" type="submit">保存</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div id="disclaimerDialog" class="modal-backdrop disclaimer-backdrop" hidden>
+      <div class="modal-card disclaimer-card" role="dialog" aria-modal="true" aria-labelledby="disclaimerTitle">
+        <div class="modal-head">
+          <div>
+            <p>使用前提示</p>
+            <h3 id="disclaimerTitle">免责声明</h3>
+          </div>
+        </div>
+        <div class="disclaimer-body">
+          <p>本系统仅供个人学习、算法研究、设备调试和授权场景下的低延迟视觉控制测试使用。使用者应自行确认所在地区法律法规、平台协议、赛事规则和第三方服务条款，并承担因使用本系统产生的全部责任。</p>
+          <p>请勿将本系统用于破坏公平竞技、绕过平台限制、干扰他人设备或任何违法违规用途。因不当使用造成的账号处罚、服务限制、数据损失、设备异常或其他后果，均由使用者自行承担。</p>
+          <p>点击继续表示你已阅读并理解上述内容。</p>
+        </div>
+        <div class="modal-actions disclaimer-actions">
+          <button id="acceptDisclaimerButton" class="ghost-button" type="button">确认</button>
+          <button id="hideDisclaimerButton" class="ghost-button" type="button">不再显示</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="announcementDialog" class="modal-backdrop announcement-backdrop" hidden>
+      <div class="modal-card announcement-card" role="dialog" aria-modal="true" aria-labelledby="announcementTitle">
+        <div class="modal-head">
+          <div>
+            <p>系统公告</p>
+            <h3 id="announcementTitle">公告</h3>
+          </div>
+          <button id="closeAnnouncementButton" class="icon-button" type="button" aria-label="关闭公告">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <div id="announcementBody" class="announcement-body"></div>
+        <div class="modal-actions announcement-actions">
+          <button id="ackAnnouncementButton" class="ghost-button" type="button">知道了</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="activationSetupOverlay" class="setup-overlay" hidden>
+      <div class="setup-card" role="status" aria-live="polite" aria-labelledby="activationSetupTitle">
+        <div class="setup-head">
+          <p>首次激活初始化</p>
+          <h3 id="activationSetupTitle">正在准备设备硬件身份</h3>
+        </div>
+        <div class="setup-progress-track" aria-hidden="true">
+          <span id="activationSetupProgress" style="width: 0%"></span>
+        </div>
+        <ol class="setup-step-list">
+          <li id="activationSetupStepLicense">授权验证完成</li>
+          <li id="activationSetupStepDisplay">应用显示器模式</li>
+          <li id="activationSetupStepWait">等待显示链路稳定</li>
+          <li id="activationSetupStepMouse">启用鼠标输出</li>
+        </ol>
+        <p id="activationSetupMessage" class="setup-message">请保持设备供电，不要关闭页面。</p>
+      </div>
+    </div>
+
+    <div id="licenseGateOverlay" class="license-gate-overlay" role="dialog" aria-modal="true" aria-labelledby="licenseGateTitle" hidden>
+      <section class="license-gate-card" aria-label="设备激活">
+        <div class="license-gate-head">
+          <p>设备授权</p>
+          <h2 id="licenseGateTitle">输入激活码后继续使用</h2>
+        </div>
+        <p id="licenseGateStatus" class="license-gate-status">设备未激活，请输入激活码后继续使用。</p>
+        <label class="field license-gate-field">激活码
+          <input id="licenseGateKeyInput" type="text" autocomplete="off" placeholder="输入激活码">
+        </label>
+        <div class="license-gate-actions">
+          <button id="licenseGateActivateButton" class="primary-button" type="button">激活设备</button>
+          <button id="licenseGateRefreshButton" class="ghost-button" type="button">刷新状态</button>
+        </div>
+      </section>
+    </div>
+
+    <div id="toast" class="toast hidden"></div>
+  </div>
+
+  <script src="{{ url_for('static', filename='apiClient.js') }}?v={{ asset_version }}"></script>
+  <script src="{{ url_for('static', filename='update.js') }}?v={{ asset_version }}"></script>
+  <script src="{{ url_for('static', filename='app.js') }}?v={{ asset_version }}-activation-redirect-v2-wifi-brand-ap-v1-auto-start-layout-v2-preset-rename-v1-usb-proxy-timing-v1-auto-calibration-v4-pid-defaults-v1-manual-values-v1-calibration-first-v1-physical-button-block-v1-motion-preset-state-v1-rapid-fire-left-v1-back-flick-class-v1"></script>
+  {% if motion_training_available is not defined or motion_training_available %}
+  {% if motion_training_collection_available is defined and not motion_training_collection_available %}
+  <script src="{{ url_for('static', filename='motion_training_mobile.js') }}?v={{ asset_version }}-v3"></script>
+  {% else %}
+  <script src="{{ url_for('static', filename='motion_training.js') }}?v={{ asset_version }}-v7"></script>
+  {% endif %}
+  {% endif %}
+</body>
+</html>

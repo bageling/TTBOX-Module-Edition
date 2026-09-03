@@ -1,0 +1,18 @@
+[Unit]
+Description=TTBOX Web Plugin
+After=ttbox-core.service
+Requires=ttbox-core.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/ttbox/plugins/web
+ExecStart=/opt/ttbox/plugins/web/bin/ttbox-web
+Environment=TTBOX_ROOT=/opt/ttbox/plugins/web
+Environment=TTBOX_WEB_HOST=0.0.0.0
+Environment=TTBOX_WEB_PORT=8080
+Environment=TTBOX_PREVIEW_URL=http://127.0.0.1:8082
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

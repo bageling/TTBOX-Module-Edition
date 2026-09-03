@@ -1,0 +1,47 @@
+// CoreContracts.hpp — TTBOX Core 稳定数据契约
+#pragma once
+
+#include <cstdint>
+#include <string>
+#include <vector>
+
+#include "common/Types.hpp"
+
+namespace ttbox::core {
+
+using Frame = FrameBuffer;
+
+struct Detection {
+    int class_id = 0;
+    float confidence = 0.0f;
+    float x1 = 0.0f;
+    float y1 = 0.0f;
+    float x2 = 0.0f;
+    float y2 = 0.0f;
+    uint64_t frame_number = 0;
+    uint64_t timestamp_us = 0;
+
+    float width() const { return x2 - x1; }
+    float height() const { return y2 - y1; }
+};
+
+struct MouseCommand {
+    int32_t dx = 0;
+    int32_t dy = 0;
+    uint64_t frame_number = 0;
+    uint64_t timestamp_us = 0;
+    bool valid = false;
+};
+
+inline Detection to_detection(const DetectionBox& box, uint64_t frame_number = 0,
+                              uint64_t timestamp_us = 0) {
+    return {box.class_id, box.score, box.x1, box.y1, box.x2, box.y2,
+            frame_number, timestamp_us};
+}
+
+inline DetectionBox to_detection_box(const Detection& detection) {
+    return {detection.x1, detection.y1, detection.x2, detection.y2,
+            detection.confidence, detection.class_id};
+}
+
+}  // namespace ttbox::core

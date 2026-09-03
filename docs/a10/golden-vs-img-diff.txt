@@ -1,0 +1,89 @@
+# golden-vs-img-diff.txt
+# GOLDEN PASS 系统（原开发系统，192.168.0.2，Ubuntu 24.04.1 + 6.1.0-1025-rockchip）
+#   对比
+# AIBox-v0.0.1-orangepi5plus.img（桌面副本，7-Zip 解包 rootfs 分区分析）
+#
+# 生成时间：2026-08-14
+# 结论：Boot/Kernel/DT/DTBO/Firmware 全部一致；唯一差异 = root UUID（致命）
+
+================================================================
+1. ROOT UUID（致命差异 = ROOT CAUSE）
+================================================================
+GOLDEN rootfs UUID  : c3855003-b298-4ef0-bb40-149bed57fd8c
+IMG   rootfs UUID   : b782e19b-2294-4d60-b4f2-b5e0e493029e  ← mkfs.ext4 新生成
+
+IMG 内 /boot/extlinux/extlinux.conf :
+    append root=UUID=c3855003-b298-4ef0-bb40-149bed57fd8c ...   ← 旧 UUID（错）
+IMG 内 /etc/fstab :
+    UUID=c3855003-b298-4ef0-bb40-149bed57fd8c / ext4 ...        ← 旧 UUID（错）
+
+→ 内核以 root=UUID=c3855003 查找分区，但新 rootfs 实际为 b782e19b
+→ 根分区无法挂载，系统无法启动（initramfs 等待 root 超时）
+→ 无 DRM 初始化、无任何显示输出（第一/第二屏均无）
+
+修复：构建时 mkfs 后读取新 UUID，sed 更新 extlinux.conf + fstab（见 a10_build_v2.sh）
+
+================================================================
+2. U-Boot / BL31 / 分区布局
+================================================================
+GOLDEN : GPT, p1 CIDATA vfat 4MiB @16.8MB, p2 rootfs ext4 15.6G @21MB,
+         U-Boot ITB @8MiB（/usr/lib/u-boot/u-boot.itb）
+IMG    : GPT, p1 CIDATA 4MiB @16.8MB（dd 原样）, p2 rootfs ext4 8G @21MB,
+         U-Boot ITB @8MiB（dd 原样, 前 21MB 逐字节复制）
+差异   : p2 大小 15.6G→8G（预期）；p2 分区属性 boot,esp 未保留（已在新构建修复）
+状态   : U-Boot/BL31 与 GOLDEN 完全一致（未替换）✅
+
+================================================================
+3. Kernel
+================================================================
+GOLDEN : vmlinuz-6.1.0-1025-rockchip (53,682,688 B)
+IMG    : vmlinuz-6.1.0-1025-rockchip (53,682,688 B)  ✅ 相同
+initrd : initrd.img-6.1.0-1025-rockchip (16,755,922 B)  ✅ 相同
+
+================================================================
+4. DTB
+================================================================
+GOLDEN : rk3588-orangepi-5-plus.dtb（/lib/firmware/6.1.0-1025-rockchip/device-tree/rockchip/）
+IMG    : rk3588-orangepi-5-plus.dtb (281,782 B)  ✅ 存在
+         （rsync 复制，与 GOLDEN 同一文件）
+
+================================================================
+5. DT overlay
+================================================================
+GOLDEN : extlinux.conf fdtoverlays .../overlay/rk3588-hdmirx.dtbo
+IMG    : rk3588-hdmirx.dtbo (421 B)  ✅ 存在（rsync 复制）
+         7-Zip 完整解包验证：overlay 目录数百个 dtbo 均保留
+
+================================================================
+6. extlinux.conf（/boot/extlinux/extlinux.conf）
+================================================================
+相同项：default/linux/initrd/fdtdir/fdtoverlays/console/cgroup 全部一致
+差异项：root=UUID=<GOLDEN 旧值>   ← 致命，见第 1 节
+
+================================================================
+7. firmware
+================================================================
+GOLDEN : /lib/firmware/6.1.0-1025-rockchip/device-tree/（含全部 dtb + overlay）
+IMG    : 完整保留（rsync）✅
+
+================================================================
+8. cmdline（内核启动参数）
+================================================================
+GOLDEN : root=UUID=c3855003... rootwait rw console=ttyS2,1500000 console=tty1
+         cgroup_enable=cpuset cgroup_memory=1 cgroup_enable=memory
+IMG    : 同上（仅 root=UUID 错误）→ 致命，见第 1 节
+
+================================================================
+9. HDMI RX / 显示相关
+================================================================
+HDMI RX 依赖：rk3588-hdmirx.dtbo（overlay）+ rk_hdmirx 驱动 → IMG 完整 ✅
+显示输出依赖：rk3588-orangepi-5-plus.dtb 中 vop/drm 节点 → IMG 完整 ✅
+结论：HDMI/DRM 相关文件无差异；显示失效的根因是系统未启动（UUID）
+
+================================================================
+10. 制作过程回溯（导致 UUID 差异的步骤）
+================================================================
+构建脚本 a10_build_rootfs.sh 流程：
+  mkfs.ext4 → mount → rsync rootfs → 清理 → chroot 设账号 → umount
+缺失步骤：mkfs 后未读取新 UUID、未更新 extlinux.conf / fstab
+→ 这是唯一的制作缺陷；GOLDEN Boot/Kernel/DT 均被正确复制
