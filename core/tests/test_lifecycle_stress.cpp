@@ -66,6 +66,7 @@ int main() {
         RuntimeConfig cfg;
         auto base = std::make_shared<RuntimeProfile>();
         base->mouse.kp_x = 10.0f;
+        base->mouse.kp_y = 20.0f;  // 保持 y=2x 不变量（否则读者读 base 快照误报撕裂）
         cfg.update(base);
         std::atomic<bool> stop{false};
         std::atomic<int> read_errors{0};
