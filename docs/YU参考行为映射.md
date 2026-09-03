@@ -1,0 +1,68 @@
+# YU 参考行为映射（第13阶段）
+
+> 本文档记录 TTBOX TargetSelector / Target Lock 与 YU 参考项目行为的映射关系。
+> 原则：**已确认的 YU 行为优先复现；未知行为标记为未知，不自行脑补。**
+
+## 一、目标选择链路（YU 行为 → TTBOX 实现）
+
+YU 参考行为（已确认）：
+
+```
+Detection
+→ FOV过滤
+→ class过滤
+→ confidence过滤
+→ 距离FOV中心排序
+→ priority
+→ 目标锁定
+→ 目标切换
+```
+
+TTBOX 实现映射：
+
+| YU 行为 | TTBOX 实现 | 状态 |
+|---|---|---|
+| FOV 过滤 | `collect_candidates()` 中 `d_sq > radius_sq` 丢弃（radius = min(roi)/2 × fov_range） | ✅ 已复现 |
+| class 过滤 | `class_filter` 非空时按列表过滤 | ✅ 已复现 |
+| confidence 过滤 | `b.score < cfg.confidence` 丢弃 | ✅ 已复现 |
+| 距离 FOV 中心排序 | 候选按 `dist_sq` 升序（距中心近者优先） | ✅ 已复现 |
+| **priority** | **第13阶段新增**：`priority_enabled` + `priority_classes`(1) + `priority_classes_high`(2)，排序改为 priority 降序、同 priority 按距离升序 | ✅ 已复现 |
+| 目标锁定 | 3 层选择：track_lock（锁定 track 延续）→ rect_lock（位置匹配）→ score（新 track） | ✅ 已复现 |
+| 目标切换 | 锁定目标丢失宽限耗尽后放弃激活，重新选择 | ✅ 已复现 |
+
+## 二、Target Lock（锁定）行为
+
+| YU 行为 | TTBOX 实现 | 状态 |
+|---|---|---|
+| 目标短暂消失不立即切换 | track 保留宽限期（lost_grace_ms，默认 30ms），宽限内恢复检测 → 同 target_id 延续 | ✅ 已复现 |
+| 优先保持当前 target_id | 激活 track 在宽限内优先匹配（track_lock 层） | ✅ 已复现 |
+| 超过宽限才判定丢失 | `lost_frames*7 >= lost_grace_ms+7` 时放弃激活 | ✅ 已复现 |
+| 目标切换时 Reset 状态 | AimThread 在 target_id 变化时 reset PID/余数/预测状态 | ✅ 已复现 |
+| 空检测帧安全语义 | 空帧立即返回 invalid（**安全红线**：不允许凭旧坐标输出移动；短时丢失的保持由 AimStateMachine LOST_GRACE 层负责） | ✅ 已确认 |
+
+## 三、已确认 / 未确认行为清单
+
+### 已确认（有 YU 参考或实测证据）
+
+1. 目标选择过滤顺序（FOV→class→conf→距离）——多项目共识
+2. 丢失宽限机制——YU 参数 `lost_grace_ms=30`
+3. 锁定半径自适应 `lock_radius = max(1, 0.06×框宽)`——YU 公式
+4. 目标切换清理 PID 状态——多项目共识
+5. 空检测帧零输出（安全）——TTBOX 实测红线
+
+### 未确认（标记为未知，不脑补）
+
+1. **priority 具体权重数值**：YU 的 priority 排序细节未完全逆向确认，
+   本阶段实现为"两级优先级列表（普通=1/高=2）"，**默认关闭**（priority_enabled=false），
+   不改变既有"距离最近优先"行为。若后续逆向出 YU 精确权重，再对齐。
+2. **class 过滤与 FOV 过滤的先后**：YU 参考先 class 后 conf 或反之未严格确认；
+   TTBOX 实现为 conf→class→FOV（过滤结果等价，仅执行顺序不同）。
+3. **丢失宽限的精确帧数换算**：`lost_frames*7 >= grace+7` 是近似换算（7ms/帧假设），
+   实际帧间隔随推理负载波动，宽限时间≈30ms 是目标值。
+
+## 四、为什么"空检测帧保持目标"放在 AimStateMachine 而非 TargetSelector
+
+- **TargetSelector**：空检测帧返回 invalid（数据事实：没有检测框）
+- **AimStateMachine**：根据 invalid + 时间进入 LOST_GRACE 状态，控制层保持目标但不输出移动
+- **理由**：安全红线——不允许用旧坐标产生任何移动输出；
+  "保持目标"是状态机决策，不是选择器决策。分层职责清晰。
