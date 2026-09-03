@@ -32,6 +32,7 @@ void AimThread::loop() {
         if (mailbox_->take_latest(&task, last_frame)) {
             last_frame = task.frame_number;
             const uint64_t previous_timestamp_us = last_timestamp_us_;
+            const int target_id_before = last_target_id_;  // 本帧切换判定基准
             // 新控制链：目标选择 → 误差 → 纯 PID/P 控制 → OutputAction。
             TargetSelectorConfig scfg;
             scfg.roi_w = task.frame_width; scfg.roi_h = task.frame_height;
@@ -215,6 +216,28 @@ void AimThread::loop() {
                 ds.command.timestamp_us = task.timestamp_us;
                 ds.mouse_disabled = !injection_allowed;  // 本阶段恒 true（禁止注入）
                 pipeline_debug_.sample(ds);
+            }
+            // ---- 第13阶段：PID 逐帧 Trace 采集（默认关闭；只记录不改变控制行为）----
+            if (pid_trace_.enabled()) {
+                PidTrace::Entry e;
+                e.timestamp_us = task.timestamp_us;
+                e.frame_number = task.frame_number;
+                e.target_id = selected.valid ? selected.target_id : -1;
+                e.target_x = selected.valid ? tx : 0.0f;
+                e.target_y = selected.valid ? ty : 0.0f;
+                e.reference_x = selected.valid ? ref_x : 0.0f;
+                e.reference_y = selected.valid ? ref_y : 0.0f;
+                e.error_x = ex;
+                e.error_y = ey;
+                e.controller_raw_x = selected.valid ? aibox_x : 0.0f;
+                e.controller_raw_y = selected.valid ? aibox_y : 0.0f;
+                e.final_command_x = move_x;
+                e.final_command_y = move_y;
+                e.target_switch = (selected.valid && target_id_before != -1 &&
+                                   selected.target_id != target_id_before) ? 1 : 0;
+                e.target_lost = selected.valid ? 0 : 1;
+                e.confidence = selected.valid ? selected.box.score : 0.0f;
+                pid_trace_.record(e);
             }
             last_timestamp_us_ = task.timestamp_us;
             std::lock_guard<std::mutex> lk(status_mutex_);

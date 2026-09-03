@@ -66,21 +66,45 @@ TEST(selector_crossing_targets_no_switch) {
     }
 }
 
-// 目标消失：空帧时 selector 返回 invalid（宽限保持由 AimStateMachine 层负责），
-// 恢复检测后 id 延续（track 仍在宽限内）。
+// 目标消失：空帧时 selector 返回 invalid（安全语义：不凭旧坐标输出移动），
+// 恢复检测后 id 延续（track 仍在宽限内，经 rect_lock/track 复用）。
 TEST(selector_target_gone_then_reacquire) {
     TargetSelector sel;
     auto cfg = make_cfg();
     auto r1 = sel.select({box(320, 240, 60, 120)}, cfg, 100);
     CHECK(r1.valid);
     const int id1 = r1.target_id;
-    // 空帧：invalid（设计行为）
+    // 空帧：invalid（安全红线：不允许旧坐标漂移）
     auto r2 = sel.select({}, cfg, 115);
     CHECK(!r2.valid);
     // 宽限内目标重现：track 延续，id 不变（不重建新 track）
     auto r3 = sel.select({box(322, 242, 60, 120)}, cfg, 125);
     CHECK(r3.valid);
     CHECK_EQ(r3.target_id, id1);
+}
+
+// 目标丢失宽限：空帧立即 invalid（安全），但 track 保留；宽限内恢复 → 同 id 延续；
+// 超过宽限（lost_frames*7 >= grace+7）→ 放弃激活，重新出现 → 重新选择。
+TEST(selector_target_lost_grace_exhausted) {
+    TargetSelector sel;
+    auto cfg = make_cfg();  // lost_grace_ms=30 → 空帧宽限 ≈5 帧
+    auto r1 = sel.select({box(320, 240, 60, 120)}, cfg, 100);
+    CHECK(r1.valid);
+    const int id1 = r1.target_id;
+    // 宽限内（约 2 个空帧）恢复 → 同 id 延续（track 未删）
+    sel.select({}, cfg, 110);                       // 空帧1
+    auto r2 = sel.select({box(321, 241, 60, 120)}, cfg, 115);
+    CHECK(r2.valid);
+    CHECK_EQ(r2.target_id, id1);
+    // 超过宽限：连续 10 个空帧（≈70ms > 30ms）→ 最后一次 invalid（激活已放弃）
+    for (int i = 0; i < 10; ++i) {
+        sel.select({}, cfg, static_cast<uint32_t>(200 + i * 7));
+    }
+    auto r_last = sel.select({}, cfg, 300);
+    CHECK(!r_last.valid);
+    // 目标重新出现：能重新选择（valid）
+    auto r_new = sel.select({box(320, 240, 60, 120)}, cfg, 350);
+    CHECK(r_new.valid);
 }
 
 // 目标排序变化（vector 顺序翻转）：track id 仍按位置匹配，不因排序变化换人
@@ -130,6 +154,36 @@ TEST(selector_target_teleport_reattach) {
     // 允许换 id（teleport 语义）——重点是 valid 且不崩
     (void)id1;
     CHECK(r2.target_id >= 0);
+}
+
+// YU 对齐：priority 排序 —— 启用优先级后，远处高优先目标胜过近处普通目标
+TEST(selector_priority_classes_win) {
+    TargetSelector sel;
+    auto cfg = make_cfg();
+    cfg.priority_enabled = true;
+    cfg.priority_classes_high = {5};   // class 5（bus）高优先
+    // 近处普通目标（class 0, 距中心近）+ 远处高优先目标（class 5, 距中心远）
+    const auto near_common = box(330, 240, 60, 120);   // class 0，近
+    const auto far_prio   = box(500, 380, 60, 120);    // class 5，远
+    // 手动构造不同 class：box() 默认 class 0，需单独设 class
+    auto b1 = near_common; b1.class_id = 0;
+    auto b2 = far_prio;   b2.class_id = 5;
+    auto r = sel.select({b1, b2}, cfg, 100);
+    CHECK(r.valid);
+    // 高优先 class 5 应被选中（即使更远）
+    CHECK_EQ(r.box.class_id, 5);
+}
+
+// YU 对齐：未启用 priority 时保持"距离最近优先"（兼容旧行为）
+TEST(selector_priority_disabled_distance_wins) {
+    TargetSelector sel;
+    auto cfg = make_cfg();
+    cfg.priority_enabled = false;  // 默认
+    auto b1 = box(330, 240, 60, 120); b1.class_id = 0;  // 近
+    auto b2 = box(500, 380, 60, 120); b2.class_id = 5;  // 远
+    auto r = sel.select({b1, b2}, cfg, 100);
+    CHECK(r.valid);
+    CHECK_EQ(r.box.class_id, 0);  // 距离最近优先
 }
 #include <cstdio>
 

@@ -42,6 +42,8 @@ core/core.*
 *.raw
 *.h264
 *.yuv
+# PID Trace 采集 CSV（运行时产物，不入库）
+pid_trace*.csv
 # 大模型文件（.pt / .onnx / 大 .rknn）
 *.pt
 *.pth

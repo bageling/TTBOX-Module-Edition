@@ -141,6 +141,9 @@ bool Application::build_runtime_params(CoreRuntime::Params& out_params,
         config_.get_bool("pipeline_debug_enabled", false);
     out_params.pipeline_debug_interval =
         static_cast<uint32_t>(config_.get_int("pipeline_debug_interval", 60));
+    // 第13阶段：PID Trace 采集（默认关闭；开启后逐帧写 CSV，只记录不改变行为）
+    out_params.pid_trace_enabled = config_.get_bool("pid_trace_enabled", false);
+    out_params.pid_trace_path = config_.get_string("pid_trace_path", "/tmp/pid_trace.csv");
 
     const std::string output_kind = config_.get_string("output_backend", "aibox");
     bool enabled = config_.get_bool("output_enabled", false);

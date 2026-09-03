@@ -3,6 +3,7 @@
 #pragma once
 #include <atomic>
 #include <cstdint>
+#include <cstdio>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -14,6 +15,7 @@
 #include "model/RuntimeProfile.hpp"
 #include "aim/Pid1Controller.hpp"
 #include "aim/PipelineDebug.hpp"
+#include "aim/PidTrace.hpp"
 namespace ttbox::core::aim {
 class AimThread {
 public:
@@ -74,6 +76,19 @@ public:
         pipeline_debug_.enabled = enabled;
         pipeline_debug_.sample_interval = sample_interval > 0 ? sample_interval : 60;
     }
+
+    // 第13阶段：PID Trace 采集开关（config 控制；默认关闭，只记录不改变行为）
+    void set_pid_trace(bool enabled, const std::string& path = "") {
+        if (enabled) {
+            if (!pid_trace_.open(path)) {
+                std::fprintf(stderr, "[PidTrace] 打开 Trace 文件失败: %s\n",
+                             path.empty() ? "/tmp/pid_trace.csv" : path.c_str());
+                return;
+            }
+        } else {
+            pid_trace_.close();
+        }
+    }
     Status status() const;
 private:
     void loop();
@@ -90,6 +105,7 @@ private:
     Pid1Controller pid_y_;   // pid1.cpp P_PID 1:1 移植：Y 轴（predict=0.0）
     AimStateMachine state_machine_;
     PipelineDebug pipeline_debug_;  // 第13阶段：链路诊断采样器（默认关闭）
+    PidTrace pid_trace_;            // 第13阶段：PID 逐帧 Trace 采集（默认关闭）
     uint64_t last_timestamp_us_ = 0;
     float remainder_x_ = 0.0f;
     float remainder_y_ = 0.0f;

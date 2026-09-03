@@ -48,10 +48,16 @@ std::vector<TargetSelector::Candidate> TargetSelector::collect_candidates(
         const float bdy = b.y1 + (b.y2 - b.y1) * cfg.aim_ratio_y - cy;
         const float d_sq = bdx * bdx + bdy * bdy;
         if (d_sq > radius_sq) continue;  // FOV 范围外
-        out.push_back({b, box_center_x(b), box_center_y(b), d_sq});
+        out.push_back({b, box_center_x(b), box_center_y(b), d_sq,
+                       class_priority(cfg, b.class_id)});
     }
+    // YU 对齐排序：priority 高者优先，同 priority 按距离近者优先。
+    // （priority 用于"同距离竞争"时的目标优先级，不影响距离本身。）
     std::sort(out.begin(), out.end(),
-              [](const Candidate& a, const Candidate& b) { return a.dist_sq < b.dist_sq; });
+              [](const Candidate& a, const Candidate& b) {
+                  if (a.priority != b.priority) return a.priority > b.priority;
+                  return a.dist_sq < b.dist_sq;
+              });
     return out;
 }
 
@@ -60,6 +66,9 @@ TargetSelection TargetSelector::select(const std::vector<DetectionBox>& dets,
     TargetSelection out;
     if (dets.empty() || cfg.roi_w == 0 || cfg.roi_h == 0) {
         // 无检测：激活 track 丢失计数 + 宽限判定
+        // 注意：空检测帧立即返回 invalid（安全红线：不允许凭旧坐标产生移动）。
+        // "短暂消失保持 target_id"由 AimStateMachine 的 LOST_GRACE 层实现
+        // （track 在宽限内不删除，恢复检测后同 id 延续），见 AimStateMachine。
         for (auto& t : tracks_) {
             if (t.active) {
                 t.lost_frames++;

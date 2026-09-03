@@ -46,6 +46,14 @@ struct TargetSelectorConfig {
     float aim_ratio_x = 0.5f;
     float aim_ratio_y = 0.2f;
     float switch_match_ratio = 0.4f; // rect_lock 匹配距离 = 目标对角 × 此比例
+
+    // ---- YU 参考行为对齐（第13阶段确认）----
+    // 选择排序：距离FOV中心排序后，若启用 priority，则同距离段内按优先级（越大越优先）。
+    // YU 参考：优先级（priority）用于"同距离竞争"时优先生成新 track / 参与 score 层。
+    // 未启用（默认 0）时完全保持原有"距离最近优先"行为，兼容旧测试。
+    bool priority_enabled = false;   // 是否启用优先级排序
+    std::vector<int> priority_classes;      // 优先类别（优先级=1，列表内优先）
+    std::vector<int> priority_classes_high; // 高优先类别（优先级=2，最优先）
 };
 
 // 选择结果
@@ -92,7 +100,18 @@ public:
 
 private:
     // 从检测框列表匹配候选（过滤 + 距离排序）
-    struct Candidate { DetectionBox box; float cx, cy, dist_sq; };
+    struct Candidate {
+        DetectionBox box;
+        float cx, cy, dist_sq;
+        int priority = 0;  // YU 对齐：类别优先级（0=普通 1=优先 2=高优先）
+    };
+    // 计算类别优先级（YU 对齐）：命中 high 列表=2，命中普通列表=1，否则=0
+    int class_priority(const TargetSelectorConfig& cfg, int class_id) const {
+        if (!cfg.priority_enabled) return 0;
+        for (int c : cfg.priority_classes_high) if (c == class_id) return 2;
+        for (int c : cfg.priority_classes) if (c == class_id) return 1;
+        return 0;
+    }
     std::vector<Candidate> collect_candidates(const std::vector<DetectionBox>& dets,
                                               const TargetSelectorConfig& cfg, float cx, float cy,
                                               float radius_sq) const;

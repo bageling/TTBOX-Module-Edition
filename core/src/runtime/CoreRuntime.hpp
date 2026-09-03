@@ -32,6 +32,9 @@ public:
         // 第13阶段：链路诊断（config 控制；默认关闭）
         bool pipeline_debug_enabled = false;
         uint32_t pipeline_debug_interval = 60;
+        // 第13阶段：PID Trace 采集（config 控制；默认关闭，只记录不改变行为）
+        bool pid_trace_enabled = false;
+        std::string pid_trace_path;
     };
     bool initialize(const Params& params, std::string* error=nullptr);
     bool start(std::string* error=nullptr); void stop(); bool running() const { return running_.load(); }
@@ -53,6 +56,8 @@ private:
     PreviewModule::Params preview_params_{};
     bool pipeline_debug_enabled_ = false;      // 第13阶段：链路诊断
     uint32_t pipeline_debug_interval_ = 60;
+    bool pid_trace_enabled_ = false;           // 第13阶段：PID Trace
+    std::string pid_trace_path_;
     aim::AimThread aim_thread_;
     input::PhysicalMouseReader mouse_reader_;
     std::shared_ptr<output::IHidOutput> output_;
