@@ -2585,6 +2585,19 @@ def preview_stream():
                     upstream.connect((upstream_host, upstream_port))
                     req_line = 'GET /api/preview.mjpg HTTP/1.1\r\nHost: {}:{}\r\n\r\n'.format(upstream_host, upstream_port)
                     upstream.sendall(req_line.encode())
+                    # 剥掉上游 HTTP 响应头（读到第一个 CRLFCRLF），只透传 multipart body，
+                    # 否则浏览器会在 multipart 流里收到嵌套的 HTTP 头而无法解析。
+                    buf = b''
+                    while b'\r\n\r\n' not in buf:
+                        chunk = upstream.recv(4096)
+                        if not chunk:
+                            break
+                        buf += chunk
+                    if b'\r\n\r\n' in buf:
+                        body = buf.split(b'\r\n\r\n', 1)[1]
+                        if body:
+                            yield body
+                    # 后续字节是纯 multipart 流，直接透传
                     while True:
                         chunk = upstream.recv(65536)
                         if not chunk:
@@ -2613,8 +2626,8 @@ def preview_stream():
                     px = base64.b64decode(b64)
                     if px:
                         last_seq = seq
-                        yield b'--ttboxframe\r\n'
-                        yield b'Content-Type: image/jpeg\r\n'
+                        yield b'--ttboxframe' + b'\r\n'
+                        yield b'Content-Type: image/jpeg' + b'\r\n'
                         yield b'Content-Length: ' + str(len(px)).encode() + b'\r\n\r\n'
                         yield px
                         yield b'\r\n'
