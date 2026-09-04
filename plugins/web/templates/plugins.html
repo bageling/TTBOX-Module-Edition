@@ -1,6 +1,90 @@
 <!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TTBOX 插件管理</title><link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"></head>
-<body><main class="app-shell"><section class="module-card"><h1>插件管理</h1><p>统一查看已安装插件、版本、状态和健康状态。</p><div id="pluginList">正在加载插件…</div><h2>插件市场</h2><p>插件市场接口已预留，当前使用本地模拟仓库，不连接在线服务。</p><script>
-fetch('/api/plugins').then(r=>r.json()).then(x=>{document.getElementById('pluginList').textContent=(x.data?.plugins||[]).map(p=>`${p.plugin_id} ${p.version} ${p.state}`).join('、')||'暂无插件'}).catch(()=>{document.getElementById('pluginList').textContent='插件状态暂不可用'});
-</script></section></main></body></html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TTBOX 插件管理</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<style>
+.plugin-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px}
+.plugin-card{background:var(--card-bg,#fff);border:1px solid var(--border,#ddd);border-radius:10px;padding:16px}
+.plugin-card h3{margin:0 0 4px;font-size:15px}
+.plugin-card .meta{color:var(--muted,#888);font-size:12px;margin-bottom:8px}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;margin-right:6px}
+.badge.running{background:#e6f7e6;color:#1a7f37}
+.badge.stopped,.badge.installed,.badge.disabled{background:#f1f1f1;color:#666}
+.badge.failed,.badge.invalid{background:#fde8e8;color:#c62828}
+.badge.healthy{background:#e6f7e6;color:#1a7f37}
+.badge.unknown{background:#f1f1f1;color:#888}
+.badge.degraded{background:#fff4e5;color:#b26a00}
+.actions{margin-top:10px}
+.actions button{background:#2563eb;color:#fff;border:0;border-radius:6px;padding:5px 12px;margin:2px 4px 2px 0;cursor:pointer;font-size:12px}
+.actions button:disabled{opacity:.4;cursor:not-allowed}
+.actions button.danger{background:#dc2626}
+.error-line{color:#c62828;font-size:12px;margin-top:6px;word-break:break-all}
+.status-bar{display:flex;gap:16px;margin-bottom:16px;flex-wrap:wrap}
+.status-bar .stat{background:var(--card-bg,#fff);border:1px solid var(--border,#ddd);border-radius:8px;padding:10px 16px;font-size:13px}
+</style>
+</head>
+<body>
+<main class="app-shell">
+<section class="module-card">
+<h1>插件管理</h1>
+<p>当前 TTBOX 运行的全部插件、状态与健康度。操作结果实时刷新。</p>
+<div class="status-bar" id="statusBar"><div class="stat">加载中…</div></div>
+<div id="pluginList"><p>正在加载插件…</p></div>
+<h2 style="margin-top:24px">插件市场</h2>
+<p>插件市场接口已预留，当前使用本地模拟仓库，不连接在线服务。</p>
+<div id="marketList"><p>正在加载市场…</p></div>
+</section>
+</main>
+<script>
+const $=s=>document.querySelector(s);
+const stateText={running:'运行中',stopped:'已停止',installed:'已安装',disabled:'已禁用',enabled:'已启用',failed:'失败',invalid:'无效',uninstalled:'未安装'};
+const healthText={healthy:'健康',degraded:'降级',failed:'失败',unknown:'未知'};
+function badge(cls,t){return '<span class="badge '+cls+'">'+t+'</span>'}
+async function j(url,opts){const r=await fetch(url,opts||{});const d=await r.json().catch(()=>({ok:false,error:'响应解析失败'}));return {r,d}}
+function render(){
+  j('/api/plugins').then(({d})=>{
+    const ps=(d.data&&d.data.plugins)||[];
+    const ok=ps.filter(p=>p.state==='running').length;
+    const fail=ps.filter(p=>p.state==='failed'||p.state==='invalid'||p.health==='failed').length;
+    $('#statusBar').innerHTML=
+      '<div class="stat">插件总数 <b>'+ps.length+'</b></div>'+
+      '<div class="stat">运行中 <b>'+ok+'</b></div>'+
+      '<div class="stat">异常 <b>'+fail+'</b></div>';
+    const valid=ps.filter(p=>p.plugin_type!=='invalid'&&!['__pycache__','repository'].includes(p.plugin_id));
+    $('#pluginList').innerHTML=valid.length?'<div class="plugin-grid">'+valid.map(p=>{
+      const st=p.state,hl=p.health;
+      const running=(st==='running');
+      return '<div class="plugin-card"><h3>'+(p.name||p.plugin_id)+'</h3>'+
+        '<div class="meta">'+p.plugin_id+' v'+p.version+' · '+(p.plugin_type==='builtin'?'内置':'进程')+
+        (p.autostart?' · 自启':'')+'</div>'+
+        badge(running?'running':(st==='failed'||st==='invalid'?'failed':(st==='disabled'?'disabled':'stopped')),stateText[st]||st)+
+        badge(hl==='healthy'?'healthy':(hl==='failed'?'failed':'unknown'),healthText[hl]||hl)+
+        '<div class="actions">'+
+        '<button '+(running?'disabled':'')+' onclick="act(\''+p.plugin_id+'\',\'start\')">启动</button>'+
+        '<button '+(running?'':'disabled')+' onclick="act(\''+p.plugin_id+'\',\'stop\')">停止</button>'+
+        '<button onclick="act(\''+p.plugin_id+'\',\'restart\')">重启</button>'+
+        '<button '+(p.enabled?'':'disabled')+' onclick="act(\''+p.plugin_id+'\',\'disable\')">禁用</button>'+
+        '<button '+(p.enabled?'disabled':'')+' onclick="act(\''+p.plugin_id+'\',\'enable\')">启用</button>'+
+        '</div>'+(p.error?'<div class="error-line">'+p.error+'</div>':'')+
+        '</div>';
+    }).join('')+'</div>':'<p>暂无有效插件</p>';
+  }).catch(()=>{$('#pluginList').innerHTML='<p>插件状态暂不可用</p>'});
+  j('/api/plugins/market').then(({d})=>{
+    const es=(d.data&&d.data.plugins)||[];
+    $('#marketList').innerHTML=es.length?('<div class="plugin-grid">'+es.map(e=>
+      '<div class="plugin-card"><h3>'+(e.name||e.plugin_id)+'</h3><div class="meta">'+e.plugin_id+' v'+(e.version||'')+' · '+(e.author||'')+'</div>'+
+      '<p style="font-size:12px;color:var(--muted,#888)">'+(e.description||'')+'</p></div>').join('')+'</div>'):'<p>市场暂无插件</p>';
+  }).catch(()=>{});
+}
+function act(id,action){
+  fetch('/api/plugins/'+id+'/'+action,{method:'POST'}).then(r=>r.json()).then(()=>{setTimeout(render,400)})
+    .catch(()=>setTimeout(render,600));
+}
+render();
+setInterval(render,8000);
+</script>
+</body>
+</html>

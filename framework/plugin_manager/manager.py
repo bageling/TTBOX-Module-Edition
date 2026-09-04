@@ -94,7 +94,12 @@ class PluginManager:
 
     def discover(self):
         if not self.discovery: return []
-        for record in self.discovery.scan(): self.registry.add(record)
+        scanned = self.discovery.scan()
+        scanned_ids = {record.plugin_id for record in scanned}
+        for plugin_id in list(self.registry.ids()):
+            if plugin_id not in scanned_ids:
+                self.registry.remove(plugin_id)
+        for record in scanned: self.registry.add(record)
         self.registry.save(); return self.registry.list()
     def load(self): self.registry.load(); return self.registry.list()
     def save(self): self.registry.save()

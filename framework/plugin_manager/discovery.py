@@ -20,6 +20,9 @@ class PluginDiscovery:
         for directory in sorted(self.root.iterdir()):
             if not directory.is_dir() or directory.name.startswith("."):
                 continue
+            # 跳过缓存/仓库等非插件目录（__pycache__ 为 Python 缓存，repository 为包存储）
+            if directory.name.startswith("__") or directory.name == "repository":
+                continue
             manifest_path = directory / "plugin.json"
             if not manifest_path.is_file():
                 records.append(self._invalid(directory.name, str(directory), "缺少 plugin.json"))

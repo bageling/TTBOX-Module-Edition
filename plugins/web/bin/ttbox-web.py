@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""ttbox_web.py — TTBOX Web 后端（Flask）。
+"""ttbox_web.py — TTBOX Web 后端（Flask），兼容 YU 前端 API。
 
 职责：
-  1. 静态托管 Web 前端（web/static/）
-  2. 实现全部 API 路由（100+）
+  1. 静态托管 YU 前端（web/static/）
+  2. 实现 YU 全部 API 路由（100+）
   3. 通过 Unix socket 与 TTBOX Core IPC 通信
-  4. 参数翻译：配置格式 ↔ RuntimeProfile 格式
+  4. 参数翻译：YU 格式 ↔ RuntimeProfile 格式
 """
 from __future__ import annotations
 
@@ -25,11 +25,12 @@ from pathlib import Path
 from typing import Any
 
 from flask import Flask, Response, jsonify, render_template, request, send_file, url_for
+# 让 TTBOX 根目录下的 framework / ttbox_motion 领域包可被加载（必须放在 import framework_api 之前）
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from framework_api import install_framework_api
 
-# 让板端从 /opt/ttbox/web 运行时也能加载 TTBOX 根目录下的领域包。
-sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+# 板端 /opt/ttbox/web 运行时同样加载 TTBOX 根目录领域包。
 from ttbox_motion.training import MotionProfileStore, MotionSampleError, MotionTrainingError
 from ttbox_motion.calibration import (
     CalibrationAxis,
@@ -285,8 +286,8 @@ def _get_status() -> dict:
     return r.get('data', {}) if r.get('status') == 0 else {}
 
 # ====================================================================
-# 参数翻译（配置格式 ↔ RuntimeProfile 格式）
-# 映射依据：前端 collectConfig()（web/static/app.js:5663）+ Core daemon
+# 参数翻译（YU 格式 ↔ RuntimeProfile 格式）
+# 映射依据：YU 前端 collectConfig()（web/static/app.js:5663）+ YU daemon
 # 二进制字段名实测。predict_x/y 是 Pid1Controller 的 I 通道增益（无量纲），
 # rate_x/y 是 kp_gain_rate，smooth_x/y 是 soft-limit 宽度——三者全部直通。
 # ====================================================================
@@ -295,7 +296,7 @@ BIT_HOTKEYS = {v: k for k, v in HOTKEY_BITS.items()}
 
 
 def _hotkey_to_bits(v, default=0):
-    """热键字符串（'left'/'right'/''）→ 位掩码。"""
+    """YU 热键字符串（'left'/'right'/''）→ 位掩码。"""
     if isinstance(v, str):
         return HOTKEY_BITS.get(v.strip().lower(), default)
     if isinstance(v, (int, float)):
@@ -304,14 +305,14 @@ def _hotkey_to_bits(v, default=0):
 
 
 def _bits_to_hotkey(v):
-    """位掩码 → 热键字符串（0 → ''）。"""
+    """位掩码 → YU 热键字符串（0 → ''）。"""
     try:
         return BIT_HOTKEYS.get(int(v), '')
     except (TypeError, ValueError):
         return ''
 
 
-# controller 内的数值/布尔直通字段（配置 key → mouse key）
+# controller 内的数值/布尔直通字段（YU key → mouse key）
 CONTROLLER_NUMS = {
     'kp_x': 'kp_x', 'kp_y': 'kp_y',
     'ki_x': 'ki_x', 'ki_y': 'ki_y',
@@ -337,7 +338,7 @@ CONTROLLER_BOOLS = {
 
 
 def yu_body_to_profile(body: dict) -> dict:
-    """前端保存的配置格式（collectConfig 扁平结构）→ RuntimeProfile。"""
+    """YU 前端保存的配置格式（collectConfig 扁平结构）→ RuntimeProfile。"""
     ctrl = (body.get('ai') or {}).get('controller') or {}
     mouse: dict = {}
 
@@ -491,7 +492,7 @@ def yu_body_to_profile(body: dict) -> dict:
 
 
 def profile_to_yu(prof: dict) -> dict:
-    """RuntimeProfile → 前端需要的格式（populate 回读完整字段）。"""
+    """RuntimeProfile → YU 前端需要的格式（populate 回读完整字段）。"""
     mouse = prof.get('mouse') or {}
     # aim_point 在 Core JSON 层是平铺的 mouse.offset_x/mouse.offset_y
     # （RuntimeProfile::to_json 平铺输出，from_json 平铺读取）；
@@ -601,7 +602,7 @@ def collect_yu_state() -> dict:
     if registry_active:
         prof['model_id'] = registry_active
     ml_data = (ml.get('data', {}) or {}) if ml.get('status') == 0 else {}
-    # 结构：state.models = 数组，字段对齐前端模型卡片（id/display_name/backend/enabled/尺寸）
+    # YU 同构：state.models = 数组，字段对齐前端模型卡片（id/display_name/backend/enabled/尺寸）
     models = []
     for mm in ml_data.get('models', []):
         models.append({
@@ -641,7 +642,7 @@ def collect_yu_state() -> dict:
                 'initial_delay': 0,
                 'message': '开机自动启动采集和推理',
             },
-            'models': models,  # 结构：数组
+            'models': models,  # YU 同构：数组
             'selected_model_id': registry_active or active_model,
             'presets': sorted(Path(PRESETS_DIR).glob('*.json')) and
                        [p.stem for p in sorted(Path(PRESETS_DIR).glob('*.json'))] or [],
@@ -953,7 +954,7 @@ def events():
 def _deep_merge_profile(base: dict, patch: dict) -> dict:
     """RuntimeProfile 深合并：子对象（capture/fov/mouse/...）按键级合并而非整体替换。
 
-    前端每次 PUT 都是全量 collectConfig，但翻译层只产出非空子集；
+    YU 前端每次 PUT 都是全量 collectConfig，但翻译层只产出非空子集；
     若浅合并，未提交的子对象（如 geometry_filter）会被 partial dict 整体顶掉，
     导致"保存一个字段 → 其它字段全丢"的参数失效问题。
     """
@@ -1215,7 +1216,7 @@ def update_model_rknn_concurrency():
     except (TypeError, ValueError):
         return jsonify({'ok': False, 'error': 'rknn_concurrency 必须是数字'})
     conc = max(1, min(3, conc))
-    # 并发数 = NPU worker 数。映射到 worker_cores（1→单核, 2→双核, 3→三核并行）
+    # YU 语义：并发数 = NPU worker 数。映射到 worker_cores（1→单核, 2→双核, 3→三核并行）
     cores_map = {1: '1', 2: '1,2', 3: '1,2,4'}
     cpath = os.environ.get('TTBOX_CONFIG', '/opt/ttbox/config/default.json')
     try:
@@ -1482,7 +1483,7 @@ def _calib_apply_gain(calib: dict) -> tuple[bool, str]:
 
 def _calib_worker() -> None:
     """真实标定闭环：稳定检测 → X 轴往返注入 → 目标位移(px) → gain=px/count。
-    与旧后端一致：10 轮、幅度 8→32、中值去抖、Y 轴复用 X。
+    对齐 YU/旧后端：10 轮、幅度 8→32、中值去抖、Y 轴复用 X。
     注入：标定时 mouse.calibrating=true（AimThread/OutputBackend 放行 AI 移动），
     kp 输出经现有控制链驱动鼠标 → 目标在画面中位移 → aim_pos_x 反馈。"""
     prof0 = _get_runtime_profile()
@@ -1947,7 +1948,7 @@ def get_display_hardware():
             if fps: hdmi['refresh'] = float(fps.group(1))
     except Exception:
         pass
-    # 兼容结构：前端 populateDisplayHardware 消费 available/config/display_mode
+    # YU 兼容结构：前端 populateDisplayHardware 消费 available/config/display_mode
     cfg_disp = {}
     cpath = '/opt/ttbox/config/hardware_display.json'
     try:
@@ -1959,7 +1960,7 @@ def get_display_hardware():
     advertised = []
     try:
         out = subprocess.check_output(
-            ['/usr/bin/hdmirx_edid', '--list'],
+            ['/opt/aiassistance/bin/hdmirx_edid', '--list'],
             text=True, timeout=5)
         in_modes = False
         for lm in out.splitlines():
@@ -1986,11 +1987,11 @@ def get_display_hardware():
                 })
     except Exception:
         pass
-    # available_modes（结构：token/label/width/height/refresh/pixel_clock_khz）
+    # available_modes（YU 结构：token/label/width/height/refresh/pixel_clock_khz）
     available_modes = []
     try:
         out2 = subprocess.check_output(
-            ['/usr/bin/hdmirx_edid', '--list'],
+            ['/opt/aiassistance/bin/hdmirx_edid', '--list'],
             text=True, timeout=5)
         in_modes = False
         for lm in out2.splitlines():
@@ -2028,7 +2029,7 @@ def get_display_hardware():
     status_text = ''
     try:
         out = subprocess.check_output(
-            ['/usr/bin/hdmirx_edid', '--status'],
+            ['/opt/aiassistance/bin/hdmirx_edid', '--status'],
             text=True, timeout=5)
         status_text = out
         nm = re.search(r'name=(\S+)', out)
@@ -2091,7 +2092,7 @@ def update_display_hardware():
         result = {'exit': r.returncode, 'output': (r.stdout + r.stderr).strip()[-500:]}
         if r.returncode != 0:
             return jsonify({'ok': False, 'error': f'EDID 应用失败: {r.stderr or r.stdout}'[-300:]})
-    # 返回兼容结构（前端 populateDisplayHardware 消费 display_mode/loopout）
+    # 返回 YU 兼容结构（前端 populateDisplayHardware 消费 display_mode/loopout）
     # 简化：直接返回 GET 的完整结构（含 real_monitor/available_modes/advertised）
     with app.test_request_context('/api/hardware/display'):
         pass
@@ -2578,7 +2579,7 @@ def preview_stream():
     # MJPEG 流：读 Core PreviewModule 缓存（Core 端 10~15fps 生成），
     # 无帧时短暂等待而非密集空转；Core 是唯一生产节拍，本端只做搬运。
     def generate():
-        # 防糊策略：只在核心端缓存更新（seq 变化）时推新帧，
+        # YU 同款防糊策略：只在核心端缓存更新（seq 变化）时推新帧，
         # 不重复推同一帧（浏览器 img 绘制跟不上会导致 multipart 积压 → 半帧横线花屏）。
         last_seq = -1
         last_push = time.time()
