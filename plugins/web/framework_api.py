@@ -8,7 +8,7 @@ import os
 import socket
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
-from flask import jsonify, request, render_template
+from flask import jsonify, request
 
 from framework.plugin_manager import InstallRequest, InstallSource, LocalRepository, PluginManager
 from framework.plugin_manager.models import PluginHealth, PluginState
@@ -64,10 +64,6 @@ def install_framework_api(app):
     app.extensions["ttbox_plugin_manager"] = manager
     app.extensions["ttbox_plugin_repository"] = repository
     app.extensions["ttbox_system_plugins"] = system
-
-    @app.get("/plugins")
-    def plugin_page():
-        return render_template("plugins.html")
 
     @app.get("/api/plugins")
     def plugin_list():

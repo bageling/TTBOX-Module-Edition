@@ -86,9 +86,6 @@
         <button class="module-tab" type="button" data-page-target="update-page">
           <span>12</span>{{ module_labels[9] }}
         </button>
-        <button class="module-tab" type="button" data-page-target="plugin-market-page">
-          <span>13</span>插件市场
-        </button>
       </nav>
     </aside>
     <div class="workspace">
@@ -1472,26 +1469,6 @@
           </div>
         </section>
 
-        <section id="plugin-market-page" class="page-card" data-page>
-          <div class="page-head mobile-action-head">
-            <div>
-              <p>插件中心</p>
-              <h2>插件管理</h2>
-            </div>
-            <span id="pluginsSummary" class="pill">加载中…</span>
-          </div>
-          <div id="pluginGrid" class="model-card-list" aria-live="polite"></div>
-
-          <div class="page-head mobile-action-head" style="margin-top:28px">
-            <div>
-              <p>插件市场</p>
-              <h2>本地仓库</h2>
-            </div>
-            <span id="marketSummary" class="pill">加载中…</span>
-          </div>
-          <div id="marketGrid" class="model-card-list" aria-live="polite"></div>
-        </section>
-
         {% if ui_brand == "xh" %}
         <section id="fan-page" class="page-card" data-page>
           <div class="page-head mobile-action-head">
@@ -1738,7 +1715,6 @@
   </div>
 
   <script src="{{ url_for('static', filename='apiClient.js') }}?v={{ asset_version }}"></script>
-  <script src="{{ url_for('static', filename='plugins.js') }}?v={{ asset_version }}-inline"></script>
   <script src="{{ url_for('static', filename='update.js') }}?v={{ asset_version }}"></script>
   <script src="{{ url_for('static', filename='app.js') }}?v={{ asset_version }}-activation-redirect-v2-wifi-brand-ap-v1-auto-start-layout-v2-preset-rename-v1-usb-proxy-timing-v1-auto-calibration-v4-pid-defaults-v1-manual-values-v1-calibration-first-v1-physical-button-block-v1-motion-preset-state-v1-rapid-fire-left-v1-back-flick-class-v1"></script>
   {% if motion_training_available is not defined or motion_training_available %}
