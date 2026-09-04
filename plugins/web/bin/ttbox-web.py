@@ -2569,39 +2569,56 @@ def preview():
 @app.get('/api/preview.mjpg')
 def preview_stream():
     preview_url = os.environ.get('TTBOX_PREVIEW_URL', '').rstrip('/')
+    # Socket 级 streaming proxy：直接透传 8082 的 MJPEG 字节流，
+    # 不经 urllib 缓冲（urllib Response 包装引入 26% 帧率损耗 + 300ms 卡顿）。
     if preview_url:
-        try:
-            import urllib.request
-            upstream = urllib.request.urlopen(preview_url + '/api/preview.mjpg', timeout=3)
-            return Response(upstream, mimetype='multipart/x-mixed-replace; boundary=ttboxframe')
-        except Exception:
-            pass
-    # MJPEG 流：读 Core PreviewModule 缓存（Core 端 10~15fps 生成），
-    # 无帧时短暂等待而非密集空转；Core 是唯一生产节拍，本端只做搬运。
+        from urllib.parse import urlparse
+        parsed = urlparse(preview_url)
+        upstream_host = parsed.hostname or '127.0.0.1'
+        upstream_port = parsed.port or 8082
+
+        def proxy_stream():
+            while True:
+                try:
+                    upstream = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    upstream.settimeout(5)
+                    upstream.connect((upstream_host, upstream_port))
+                    req_line = 'GET /api/preview.mjpg HTTP/1.1\r\nHost: {}:{}\r\n\r\n'.format(upstream_host, upstream_port)
+                    upstream.sendall(req_line.encode())
+                    while True:
+                        chunk = upstream.recv(65536)
+                        if not chunk:
+                            break
+                        yield chunk
+                except (OSError, ConnectionResetError):
+                    pass
+                time.sleep(0.5)  # 断线重连间隔
+
+        return Response(
+            proxy_stream(),
+            mimetype='multipart/x-mixed-replace; boundary=ttboxframe',
+            headers={'Cache-Control': 'no-store, no-cache', 'X-Accel-Buffering': 'no'},
+        )
+
+    # Fallback：直接读 Core IPC（无 8082 时）
     def generate():
-        # YU 同款防糊策略：只在核心端缓存更新（seq 变化）时推新帧，
-        # 不重复推同一帧（浏览器 img 绘制跟不上会导致 multipart 积压 → 半帧横线花屏）。
         last_seq = -1
-        last_push = time.time()
         while True:
             r = ipc_request('GET_PREVIEW', timeout=2)
-            now = time.time()
             if r.get('status') == 0:
                 d = r.get('data', {})
                 b64 = d.get('jpeg_base64')
                 seq = d.get('seq', 0)
-                # seq 变化 = 核心端编码了新帧 → 推；兜底：>1s 没推也推一次（防浏览器黑屏）
-                if b64 and (seq != last_seq or now - last_push > 1.0):
+                if b64 and seq != last_seq:
                     px = base64.b64decode(b64)
                     if px:
                         last_seq = seq
-                        last_push = now
                         yield b'--ttboxframe\r\n'
                         yield b'Content-Type: image/jpeg\r\n'
-                        yield f'Content-Length: {len(px)}\r\n\r\n'.encode()
+                        yield b'Content-Length: ' + str(len(px)).encode() + b'\r\n\r\n'
                         yield px
                         yield b'\r\n'
-            time.sleep(0.03)  # 轮询节奏 33ms（Core 端 fps 决定实际帧率）
+            time.sleep(0.01)  # 10ms 轮询（Core 端 ~15fps 决定实际帧率）
     return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=ttboxframe')
 
 
