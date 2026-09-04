@@ -43,13 +43,26 @@ class CoreIpcFrameSource:
 
 class PreviewService:
     def __init__(self, source, config=None):
-        self.source=source; self.config=config or PreviewConfig(); self.config.validate(); self.enabled=True; self.running=False; self._last=None; self._lock=threading.Lock(); self._dropped=0
+        self.source=source; self.config=config or PreviewConfig(); self.config.validate(); self.enabled=True; self.running=False; self._last=None; self._lock=threading.Lock(); self._dropped=0; self._no_frame_count=0; self._last_pub_seq=-1
     def start(self): self.enabled=True; self.running=True
     def stop(self): self.running=False
     def snapshot(self):
         frame=self.source.latest()
-        if frame is None: return self._last
-        with self._lock: self._last=frame
+        if frame is None:
+            # core 停止/无帧：连续计数，清空缓存断流，防浏览器显示陈旧画框
+            self._no_frame_count += 1
+            if self._no_frame_count >= 2:
+                with self._lock:
+                    self._last=None
+                    self._last_pub_seq=-1
+            return None
+        self._no_frame_count = 0
+        with self._lock:
+            # core 重启 seq 归零：重置已推送序号，强制重新推帧
+            if frame.frame_number < self._last_pub_seq:
+                self._last_pub_seq=-1
+            self._last=frame
+            self._last_pub_seq=frame.frame_number
         return frame
     def status(self):
         frame=self.snapshot(); return {"enabled":self.enabled,"running":self.running,"health":"healthy" if frame else "unknown","frame_number":frame.frame_number if frame else 0,"timestamp_us":frame.timestamp_us if frame else 0,"width":frame.width if frame else 0,"height":frame.height if frame else 0,"pixel_format":frame.pixel_format if frame else "jpeg","source":frame.source if frame else "core_ipc","fps":self.config.fps,"dropped":self._dropped}
