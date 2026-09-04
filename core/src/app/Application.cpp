@@ -246,7 +246,7 @@ int Application::initialize(int argc, char** argv) {
     TTBOX_LOG_INFO("=== " + std::string(kAppName) + " v" +
                    std::string(kVersion) + " 启动 ===");
 
-    // ---- 风扇满转（YU fan_control min_pwm=100 同款）：防热节流拖慢 NPU ----
+    // ---- 风扇满转（fan_control min_pwm=100）：防热节流拖慢 NPU ----
     {
         std::ofstream pwm("/sys/class/hwmon/hwmon8/pwm1");
         if (pwm) {

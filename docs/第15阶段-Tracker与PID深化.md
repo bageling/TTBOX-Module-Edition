@@ -6,7 +6,7 @@
 
 ## 一、行为分类（明确四类）
 
-### YU 已确认行为
+### 已确认行为
 - 目标选择链路：FOV→class→conf→距离→priority→锁定→切换（第13阶段对齐）
 - 目标锁定延续：目标短暂消失不立即切换，宽限内同 id 延续（第14阶段实测）
 
@@ -16,14 +16,14 @@
 - Controller 使用预测后 TargetPoint 做控制计算（`prediction_time_s` 配置，默认 0=关闭）
 - Trace 全链路：原始误差 / 预测误差 / controller_raw / deadzone / rate limit / remainder / 最终 MouseCommand
 
-### 自研行为（本阶段新增，非 YU 参考）
+### 自研行为（本阶段新增）
 - AimTracker 速度估计：帧差位置/时间差 + EMA 低通（alpha=0.4）+ clamp（2500px/s）
 - 线性外推预测：`predicted = pos + vel × prediction_time`
 - 预测命中精度测试方法（t 帧预测点 vs t+pred 帧实际位置）
 
 ### 尚未确认行为
-- YU 的 prediction_time 精确取值（本阶段用 0.05s 实验，数据证明当前运动模型下无益）
-- YU 速度估计的具体滤波参数（alpha/clamp）
+- prediction_time 精确取值（本阶段用 0.05s 实验，数据证明当前运动模型下无益）
+- 速度估计的具体滤波参数（alpha/clamp）
 
 ## 二、Tracker 修改内容
 
@@ -97,7 +97,7 @@ Reset 触发：`target_switched(new_id)` 检测 target_id 变化；LOST 超过 g
 **不调整**。理由（数据驱动）：
 1. 两组真实数据均无过冲/无饱和/零延迟（第13、15阶段一致）
 2. 预测开关对比证明：预测开启对当前运动模型无益（max 误差 +40%）
-3. 等效增益 0.087 落在 YU 推荐区间（0.08~0.12）
+3. 等效增益 0.087 落在推荐区间（0.08~0.12）
 4. 9 个运动场景单测全过，无需为"有修改"而修改
 
 ## 七、回归测试

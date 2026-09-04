@@ -45,7 +45,7 @@ TTBOX 是一台基于 **RK3588 芯片（OrangePi 5 Plus）** 的 AI 视觉盒子
 | AI 核心 | C++（ttbox_core，systemd 托管） |
 | 控制台 | Web 页面（Python 服务） |
 | 模型 | .rknn 格式（瑞芯微专用，默认 yolo261n COCO 80 类） |
-| 输出 | TTBOX usbproxy（raw-gadget + libusb，1:1 复刻 YU usb-proxy） |
+| 输出 | TTBOX usbproxy（自研，raw-gadget + libusb） |
 
 **两条线路（务必分清）**：
 - **HDMI**：画面从电脑 → 盒子（盒子的"眼睛"）
@@ -79,12 +79,12 @@ Detection → TargetSelector → PID → AimThread
 
 已验证场景：AI 关闭不注入 / 目标居中 / 目标左 / 目标右 / 目标上 / 目标下 / 热键关闭即停 / 100~2000Hz 高频 0 丢包。
 
-**③ TTBOX usbproxy（1:1 复刻 YU usb-proxy）**
+**③ TTBOX usbproxy（自研 USB 鼠标代理）**
 
-- 完全摆脱 YU 加密 usb-proxy 与 AI 注入后端，TTBOX 独立完成 AI→HID 全链路
+- 完全摆脱外部加密 usb-proxy 与 AI 注入后端，TTBOX 独立完成 AI→HID 全链路
 - full passthrough 模式：克隆 Logitech 046d:c53f，物理鼠标 + AI 位移搭车合并
 - synthetic 模式：独立合成 Corsair 9A80:7072 鼠标，AI 独立注入
-- 协议逐字节对齐：cmd.sock/event.sock 0x4F50 全 15 种消息
+- 自研二进制协议：cmd.sock/event.sock 0x4F50 全 15 种消息
 - RT 调度：SCHED_FIFO 98 + CPU affinity，1000Hz 零丢失
 
 ### 📊 真实性能（2026-09-03/04 实测）
@@ -112,8 +112,8 @@ Detection → TargetSelector → PID → AimThread
 ```
 TTBOX-Module-Edition/
 ├── core/          C++ 核心（AI 高速链路，真实源码）
-├── usbproxy/      ★ TTBOX usb-proxy（1:1 复刻 YU，raw-gadget+libusb）
-├── third_party/   第三方参考（YU usb-proxy 开发源码）
+├── usbproxy/      ★ TTBOX usb-proxy（自研，raw-gadget+libusb）
+├── third_party/   第三方依赖源码（Apache-2.0，raw-gadget 生态）
 ├── framework/     Python 框架（插件管理/配置/服务/安全）
 ├── plugins/       功能插件（web/preview/model/fan/wifi/...）
 ├── platform/      平台层（systemd/运行时/模型/健康）
@@ -225,7 +225,7 @@ ctest --test-dir core/build -C Release
 ## 许可证
 
 本项目以 **MIT 许可证** 开源。详见 [LICENSE](LICENSE)。
-usbproxy/ 基于 Apache-2.0 的 [xairy/raw-gadget 示例 usb-proxy](third_party/yu-usb-proxy-src/) 复刻扩展，保留上游版权声明。
+usbproxy/ 底层使用 [raw-gadget](https://github.com/xairy/raw-gadget) 与 libusb 开源库（Apache-2.0），保留上游版权声明。
 
 ---
 

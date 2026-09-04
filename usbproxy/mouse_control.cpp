@@ -1,4 +1,4 @@
-// mouse_control.cpp — TTBOX usb-proxy mouse_control 协议层（复刻 YU 0x4F50 协议）
+// mouse_control.cpp — TTBOX usb-proxy mouse_control 协议层（自研 0x4F50 协议）
 // 分块编写：part1 全局量 + 报文编解码 + 服务骨架。
 #include "mouse_control.hpp"
 
@@ -19,7 +19,7 @@
 
 extern bool please_stop_ep0;
 
-// 对齐 YU：realtime=fifo:98 + CPU affinity（与 run_usb_proxy.sh 的 RT 设置一致）
+// RT：realtime=fifo:98 + CPU affinity（大核）
 void apply_rt_thread_policy() {
     struct sched_param sp{};
     sp.sched_priority = 98;
@@ -95,7 +95,7 @@ void send_error(int fd, uint32_t rid, uint16_t code, const char* text) {
     send_packet(fd, kErrorResp, rid, payload, 4 + tlen);
 }
 
-// ── GET_CONFIG_RESP 编码（字段顺序与 YU 一致）──
+// ── GET_CONFIG_RESP 编码（字段顺序一致）──
 void encode_config_payload(std::vector<uint8_t>& out) {
     const GadgetConfig& c = g_gadget_config;
     out.reserve(64 + c.manufacturer.size() + c.product.size() +
@@ -118,7 +118,7 @@ void encode_config_payload(std::vector<uint8_t>& out) {
     push8(c.usb_device_class);
     push8(c.usb_device_subclass);
     push8(c.usb_device_protocol);
-    push16(c.usb_max_power);   // 对齐 YU <HHHHBBBHBBBB：max_power 是 u16
+    push16(c.usb_max_power);   // 协议 <HHHHBBBHBBBB：max_power 是 u16
     push8(c.hid_protocol);
     push8(c.hid_subclass);
     push8(c.hid_report_length);
@@ -130,7 +130,7 @@ void encode_config_payload(std::vector<uint8_t>& out) {
     push_str(c.hid_report_desc_hex);
 }
 
-// ── SET_CONFIG 解码（与 YU encode_config 逐字节对应）──
+// ── SET_CONFIG 解码（协议逐字节对应）──
 // 输入：payload 指向固定字段+字符串区（不含 apply_now 字节）
 bool decode_config_payload(const uint8_t* payload, size_t plen) {
     auto rd16 = [&](size_t& off) -> uint16_t {
@@ -163,7 +163,7 @@ bool decode_config_payload(const uint8_t* payload, size_t plen) {
     c.usb_device_class = rd8(off);
     c.usb_device_subclass = rd8(off);
     c.usb_device_protocol = rd8(off);
-    c.usb_max_power = rd16(off);   // 对齐 YU <HHHHBBBHBBBB：u16
+    c.usb_max_power = rd16(off);   // 协议 <HHHHBBBHBBBB：u16
     c.hid_protocol = rd8(off);
     c.hid_subclass = rd8(off);
     c.hid_report_length = rd8(off);
@@ -177,7 +177,7 @@ bool decode_config_payload(const uint8_t* payload, size_t plen) {
     return true;
 }
 
-// ── SET_CONFIG 持久化：写回 gadget-config.json（对齐 YU：重启后生效）──
+// ── SET_CONFIG 持久化：写回 gadget-config.json（重启后生效）──
 int persist_gadget_config() {
     const char* cfg_path = getenv("USB_PROXY_GADGET_CONFIG_FILE");
     if (!cfg_path) cfg_path = "/opt/ttbox/usbproxy/gadget-config.json";
@@ -290,7 +290,7 @@ void handle_cmd_connection(int fd) {
                 }
                 send_packet(fd, kSetConfigResp, h.request_id, "\x01", 1);
                 if (apply_now) {
-                    // 对齐 YU：usb-proxy 重启 + Windows 重新枚举。
+                    // 设计：usb-proxy 重启 + Windows 重新枚举。
                     // 直接退出进程，由 systemd Restart=always 以新配置拉起。
                     fprintf(stderr, "set-config apply-now: restarting to re-enumerate\n");
                     fflush(stdout);
@@ -334,7 +334,7 @@ void handle_event_connection(int fd) {
         int64_t ts = now_ns();
         std::memcpy(ev + 1, &ts, 8);
         if (!send_packet(fd, kStateSnapshot, 0, ev, sizeof(ev))) break;
-        ::usleep(100000);  // 100ms 周期快照（与 YU 客户端订阅循环兼容）
+        ::usleep(100000);  // 100ms 周期快照（订阅循环兼容）
     }
     {
         std::lock_guard<std::mutex> lk(g_state.subscribers_mutex);
@@ -346,7 +346,7 @@ void handle_event_connection(int fd) {
 
 // ── 监听线程：accept 循环 ────────────────────────────────────────
 void* cmd_listen_loop(void* arg) {
-    apply_rt_thread_policy();  // 对齐 YU：mouse-control RT 线程
+    apply_rt_thread_policy();  // RT 线程
     int listen_fd = *static_cast<int*>(arg);
     while (g_srv.running.load()) {
         int cfd = ::accept(listen_fd, nullptr, nullptr);
@@ -362,7 +362,7 @@ void* cmd_listen_loop(void* arg) {
 }
 
 void* event_listen_loop(void* arg) {
-    apply_rt_thread_policy();  // 对齐 YU：event 线程
+    apply_rt_thread_policy();  // RT 线程
     int listen_fd = *static_cast<int*>(arg);
     while (g_srv.running.load()) {
         int cfd = ::accept(listen_fd, nullptr, nullptr);
@@ -484,7 +484,7 @@ bool mouse_control_merge_report(uint8_t* data, uint32_t len) {
     return true;
 }
 
-// 物理报告解析：更新按钮掩码 + 通知订阅者（逐按钮事件，对齐 YU）
+// 物理报告解析：更新按钮掩码 + 通知订阅者（逐按钮事件）
 // BUTTON_EVENT payload = <BBBQ button, pressed(1=down/0=up), mask, timestamp_ns
 void mouse_control_notify_physical_report(const uint8_t* data, uint32_t len) {
     if (!g_state.mouse_control_enabled.load()) return;

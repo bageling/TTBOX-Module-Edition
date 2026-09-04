@@ -396,7 +396,7 @@ ConfigManager 负责读这些文件，并把参数分发给各个模块。
 
 ### 小白理解
 你在 Web 页面上看到的每个参数（置信度、截取尺寸、PID 参数等），
-都在这里定义。它还负责把 YU 格式的参数翻译成 TTBOX 内部格式。
+都在这里定义。它还负责把历史格式的参数翻译成 TTBOX 内部格式。
 
 ### 文件位置
 `core/src/model/RuntimeProfile.cpp`

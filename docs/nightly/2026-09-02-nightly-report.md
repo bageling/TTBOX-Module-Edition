@@ -2,26 +2,26 @@
 
 ## 结论
 
-本夜完成了 YU→TTBOX 全量差异基线、P0 链路盘点和一处真实假成功修复。TTBOX 当前仍不是 YU 的完整产品等价体；核心 AI 运行稳定，但 Hotkey/HID 实际闭环、目标选择行为、部分 Movement/Assist 消费和危险副作用流程仍需专项验证。
+本夜完成了全量能力差异基线、P0 链路盘点和一处真实假成功修复。核心 AI 运行稳定，但 Hotkey/HID 实际闭环、目标选择行为、部分 Movement/Assist 消费和危险副作用流程仍需专项验证。
 
 ## 本夜完成
 
-1. 检查仓库是否存在 `YU_FUNCTION_MAP.md`、`YU_COMPLETE_PRODUCT_SPEC.md`：未找到。
-2. 采用已有 `TTBOX_YU_REFERENCE_MAP.md`、Web 功能真值表、当前源码和 RK3588 实际状态建立矩阵。
-3. 真机读取：Core/Web active，YU inactive；capture≈142.58 FPS，inference≈106.79 FPS，detections=1，tracks=1，class=3。
+1. 检查仓库是否存在 `FUNCTION_MAP.md`、`COMPLETE_PRODUCT_SPEC.md`：未找到。
+2. 采用已有 `TTBOX_REFERENCE_MAP.md`、Web 功能真值表、当前源码和 RK3588 实际状态建立矩阵。
+3. 真机读取：Core/Web active，外部服务 inactive；capture≈142.58 FPS，inference≈106.79 FPS，detections=1，tracks=1，class=3。
 4. 发现并修复远程模型接口假成功：不再返回 `mock-remote`、空模型列表或“已导入/已删除”。现在明确返回 HTTP 501 / `status=planned`。
 5. 发现并修复鼠标圆周测试假成功：不再返回“测试已开始”，当前明确返回 HTTP 501 / `status=planned`，且不发送任何动作。
 6. 发现并修复云加密模型与 Web 端口假成功：分别明确返回 HTTP 501，不写入模型仓库、不修改监听配置。
-7. 生成 `YU_TARGET_OBJECT_COMPARISON.md`，将 YU 与 TTBOX 的 Detection、TrackedTarget、TargetPoint、Candidate、CandidateRect、OverlayBox 分层对照。
+7. 生成 `TARGET_OBJECT_COMPARISON.md`，将参考实现与 TTBOX 的 Detection、TrackedTarget、TargetPoint、Candidate、CandidateRect、OverlayBox 分层对照。
 8. 同步真机并验证 `ttbox-web.service` active，4 个受影响接口均真实回读 HTTP 501。
 9. Python、JavaScript、`git diff --check` 通过。
 
 ## 结果统计（按当前可枚举能力粗粒度）
 
-- YU 功能总数：约 20 个能力组（矩阵中逐项拆分）
+- 参考能力总数：约 20 个能力组（矩阵中逐项拆分）
 - TTBOX 已等价：已确认的状态/预览/基础配置/API/模型本地管理能力约 6 组
 - TTBOX 部分等价：Movement、Assist、Profiles、Hardware、Presets、System、Preview、Update 约 10 组
-- TTBOX 缺失或未接入：远程模型协议、YU 全局热键守护、YU native Target Object 等约 3 组
+- TTBOX 缺失或未接入：远程模型协议、全局热键守护、native Target Object 等约 3 组
 - 本夜已修复：1 组（远程模型假成功改为诚实 planned）
 - 无法验证：需要真实输入/鼠标/屏幕观察或危险副作用的能力约 10 组
 
@@ -56,8 +56,8 @@
 新增：
 
 ```text
-docs/nightly/YU_TTBOX_GAP_MATRIX.md
-docs/nightly/2026-09-02-yu-compat-test.md
+docs/nightly/TTBOX_GAP_MATRIX.md
+docs/nightly/2026-09-02-compat-test.md
 docs/nightly/2026-09-02-nightly-report.md
 ```
 
@@ -74,7 +74,7 @@ scripts/ttbox_web.py
 - 未执行 OTA 安装/回滚、重启/关机。
 - 未修改前端 CSS、识别框放大、坐标缩放。
 - 未修改 TTBOX Core。
-- 未启动或接入 YU daemon。
+- 未启动或接入外部 daemon。
 
 ## 当前状态
 

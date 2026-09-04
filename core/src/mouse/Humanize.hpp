@@ -1,6 +1,6 @@
-// Humanize.hpp — YU 拟人化插件（输出附加抖动，减轻机械感）
+// Humanize.hpp — 拟人化插件（输出附加抖动，减轻机械感）
 //
-// 对齐 YU humanize 语义：目标输出附加正弦抖动（jitter_px 幅度、
+// 设计：目标输出附加正弦抖动（jitter_px 幅度、
 // jitter_frequency 频率），curve_strength 保留用于曲线混合。
 // 在 AimThread 输出链 quantize 之前调用。
 #pragma once

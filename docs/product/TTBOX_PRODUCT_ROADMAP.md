@@ -3,7 +3,7 @@
 ## 当前阶段：Phase 8.4 自动标定行为级重构
 
 本阶段已完成：
-- ✅ YU 参考服务只读逆向：Web、daemon、AArch64 Core 符号、状态字段和校准常量
+- ✅ 参考服务只读分析：Web、daemon、AArch64 Core 符号、状态字段和校准常量
 - ✅ TTBOX 自动标定行为模型与领域规格
 - ✅ TTBOX CalibrationSession 状态模型、分轴观测、Median/MAD 拟合
 - ✅ Core 暴露目标 ID、类别、中心和框尺寸

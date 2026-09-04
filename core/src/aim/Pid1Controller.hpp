@@ -1,4 +1,4 @@
-// Pid1Controller.hpp — 用户提供的 pid1.cpp P_PID 1:1 移植（X/Y 两轴共用）。
+// Pid1Controller.hpp — P_PID 控制器（X/Y 两轴共用）。
 //
 // 算法来源：外部参考实现 pid1.cpp（2026-08 用户提供）。本文件只做移植与
 // 热更新接线，不改任何公式、不叠加旧控制器。

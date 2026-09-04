@@ -1,7 +1,7 @@
 // MotionMerge.hpp — A10 物理 + AI 合并
 //
 // 保持物理鼠标透传。结构：Physical dx/dy + AI dx/dy → MotionMerge → HID Scheduler。
-// YU 的物理+AI 精确合并数学语义未确认，故不假设简单相加：
+// 物理+AI 精确合并数学语义未确认，故不假设简单相加：
 // 通过可替换的 MergeMode 策略接口控制。V1 默认：
 //   kPhysicalPassthroughAiInjection —— AI 增量注入 + 物理透传（可按 X/Y 屏蔽物理）。
 #pragma once

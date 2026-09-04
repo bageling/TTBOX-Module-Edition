@@ -1,4 +1,4 @@
-// test_pid1.cpp — pid1.cpp P_PID 1:1 移植逐点对照测试。
+// test_pid1.cpp — P_PID 逐点对照测试。
 //
 // 对照方法：把 pid1.cpp 原文的 P_PID 类原样内联进本测试（g_test_pid），
 // 用同一输入序列驱动 Pid1Controller 与 g_test_pid，逐点断言输出一致。

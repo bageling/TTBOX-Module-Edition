@@ -208,7 +208,7 @@ void InferenceWorker::loop() {
         // ---- E2E 起点：帧采集时刻（v4l2 单调时钟，与 steady_clock 同基准）----
         const double recv_ms = frame->info.timestamp_ms;
         const auto e2e_t0 = clock::now();
-        // 排队等待（YU buffer_age 同口径）：帧时间戳 → worker 认领
+        // 排队等待（buffer_age 同口径）：帧时间戳 → worker 认领
         const double claim_ms_q = std::chrono::duration<double, std::milli>(e2e_t0.time_since_epoch()).count();
         stats_.queue_wait.add(static_cast<uint64_t>(std::max(0.0, (claim_ms_q - recv_ms) * 1000.0)));
 

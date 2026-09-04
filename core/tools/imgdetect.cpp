@@ -1,5 +1,5 @@
 // imgdetect.cpp — 板端单图 GT 推理工具（真实 RKNN + TTBOX DecodeNMS）
-// 复刻 TTBOX 摄像头链路的预处理几何：中心 ROI(500x500) → 模型输入，解码映射回原图。
+// 对齐 TTBOX 摄像头链路的预处理几何：中心 ROI(500x500) → 模型输入，解码映射回原图。
 // 用法:
 //   imgdetect --model <model.rknn> --raw <BGR24.raw> --w 2560 --h 1440
 //             [--roi-x 1030 --roi-y 470 --roi-w 500 --roi-h 500]
@@ -101,7 +101,7 @@ int main(int argc, char** argv) {
     std::fprintf(stderr, "model: in=%dx%d type=%d outputs=%u\n",
                  info.input_width, info.input_height, info.input_type, info.n_outputs);
 
-    // ---- 预处理（CPU fallback，复刻 RGA ROI 中心缩放几何）----
+    // ---- 预处理（CPU fallback，对齐 RGA ROI 中心缩放几何）----
     Preprocess pre;
     PreprocessConfig pc;
     pc.detect_size = {info.input_width, info.input_height};

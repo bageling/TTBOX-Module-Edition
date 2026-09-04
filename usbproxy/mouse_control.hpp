@@ -1,5 +1,5 @@
-// mouse_control.hpp — TTBOX usb-proxy mouse_control 协议层（复刻 YU 0x4F50 协议）
-// 对应 YU 生产版 usb-proxy 的 --enable_mouse_control 功能。
+// mouse_control.hpp — TTBOX usb-proxy mouse_control 协议层（自研 0x4F50 协议）
+// 对应 --enable_mouse_control 功能。
 #pragma once
 
 #include <atomic>
@@ -10,7 +10,7 @@
 
 namespace ttbox_usbproxy {
 
-// ── 协议常量（与 YU usb-proxy-mouse-client 完全一致）──
+// ── 协议常量（自研，0x4F50）──
 constexpr uint16_t kMagic = 0x4F50;
 constexpr uint8_t kVersion = 1;
 
@@ -30,7 +30,7 @@ constexpr uint8_t kGetConfigResp = 13;
 constexpr uint8_t kSetConfigReq = 14;
 constexpr uint8_t kSetConfigResp = 15;
 
-// 按钮位掩码（与 YU 一致）
+// 按钮位掩码（自研）
 constexpr uint8_t kBtnLeft = 1;
 constexpr uint8_t kBtnRight = 2;
 constexpr uint8_t kBtnMiddle = 4;
@@ -51,7 +51,7 @@ struct PacketHeader {
 };
 #pragma pack(pop)
 
-// ── Gadget 配置（GET_CONFIG_RESP 载荷，字段顺序与 YU 一致）──
+// ── Gadget 配置（GET_CONFIG_RESP 载荷，字段顺序自研定义）──
 struct GadgetConfig {
     uint16_t usb_vid = 0x9A80;
     uint16_t usb_pid = 0x7072;

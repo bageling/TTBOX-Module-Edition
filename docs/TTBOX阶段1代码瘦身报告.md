@@ -70,7 +70,7 @@ yu-backend/yu-core-src/core/
 - `docs/TTBOX架构重构报告.md`
 - `docs/阶段1代码瘦身清理清单.md`
 - `docs/architecture/TTBOX_CANDIDATE_RECT_INVESTIGATION.md`
-- `docs/architecture/YU_TARGET_OBJECT_MODEL.md`
+- `docs/architecture/TTBOX_TARGET_OBJECT_MODEL.md`
 
 这些是历史说明文字，不是代码、构建或运行依赖。
 
@@ -524,7 +524,7 @@ HDMI
 
 处理：不修改。
 
-### 7. Web/Gateway/Platform/YU 兼容层
+### 7. Web/Gateway/Platform 兼容层
 
 原因：
 

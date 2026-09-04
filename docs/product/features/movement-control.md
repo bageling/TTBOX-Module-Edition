@@ -21,7 +21,7 @@
 
 ```
 浏览器控件 → window.ttbox.api → PUT/GET /api/config
-  → scripts/ttbox_web.py（YU↔RuntimeProfile 翻译）
+  → scripts/ttbox_web.py（配置↔RuntimeProfile 翻译）
   → IPC SET_CONFIG → Core RuntimeConfig 热更新
   → AimThread 每帧读快照 → Pid1（kp/kd/predict/rate/smooth）
   → 输出链 ×sens×output_scale → output_deadzone 门控 → OutputAction
@@ -42,7 +42,7 @@
 
 1. **sens/死区/置信度输出链**在 9f30e5f 已接通真机，`aecddfb`（小白化工程）误回退，Phase 8.3 已按真机版回归（15 个 Core 文件）。
 2. **自动标定假桩**（8e8f8c7 创建主 Gateway 时就是假桩）已替换为真实状态机（迁移旧后端实现，反馈源改 Core metrics，注入走 calibrating 模式）。
-3. **kp 换算语义**：标定保存后 kp = K_LOOP/(gain×rate×sens×output_scale)，K_LOOP=1/7 对齐 YU 原机 P 增益。手动保存也会覆盖 kp（真实业务行为，UI 有提示）。
+3. **kp 换算语义**：标定保存后 kp = K_LOOP/(gain×rate×sens×output_scale)，K_LOOP=1/7 对齐原机 P 增益。手动保存也会覆盖 kp（真实业务行为，UI 有提示）。
 4. **目标反馈**：AimThread Status.predicted_x/y（选中目标中心）→ Metrics.aim_pos_x/y → GET_STATUS（Phase 8.3 新增暴露，Core 最小扩展）。
 5. **标定放行**：mouse.calibrating=true 期间 AimThread/OutputBackend 无视热键强制放行 AI 移动（与 C 桥 compute_aiming 语义一致），结束自动恢复。
 

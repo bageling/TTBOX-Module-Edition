@@ -1,4 +1,4 @@
-// synthetic.h — TTBOX usb-proxy synthetic 模式（复刻 YU --synthetic_mouse）
+// synthetic.h — TTBOX usb-proxy synthetic 模式（自研）
 #pragma once
 
 #include <string>

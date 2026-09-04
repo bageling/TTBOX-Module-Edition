@@ -50,7 +50,7 @@ public:
         uint64_t stale = 0;
         uint64_t target_frames = 0;
         uint64_t no_target_frames = 0;
-        uint32_t tracks = 0;           // 当前跟踪中的目标数（YU detections/tracks 显示）
+        uint32_t tracks = 0;           // 当前跟踪中的目标数（detections/tracks 显示）
         float predicted_x = 0.0f;
         float predicted_y = 0.0f;
         float control_x = 0.0f;
@@ -107,8 +107,8 @@ private:
     std::atomic<uint16_t>* physical_buttons_ = nullptr;
     TargetSelector selector_;
     MotionController controller_;
-    Pid1Controller pid_x_;   // pid1.cpp P_PID 1:1 移植：X 轴（predict=3.0）
-    Pid1Controller pid_y_;   // pid1.cpp P_PID 1:1 移植：Y 轴（predict=0.0）
+    Pid1Controller pid_x_;   // P_PID：X 轴（predict=3.0）
+    Pid1Controller pid_y_;   // P_PID：Y 轴（predict=0.0）
     AimStateMachine state_machine_;
     PipelineDebug pipeline_debug_;  // 第13阶段：链路诊断采样器（默认关闭）
     PidTrace pid_trace_;            // 第13阶段：PID 逐帧 Trace 采集（默认关闭）

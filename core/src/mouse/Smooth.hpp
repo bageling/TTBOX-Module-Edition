@@ -4,7 +4,7 @@
 // 使用简单一阶低通（TTBox 自实现）：out = alpha × raw + (1-alpha) × prev。
 // alpha = 0 关闭（默认，与 A9 无平滑行为一致）。
 // 参数进入 RuntimeProfile（mouse.smooth）。
-// 说明：YU 的 smooth=9900 数学公式未确认，此处为 TTBox 自己的实现，不与 YU 声称一致。
+// 说明：smooth=9900 数学公式未确认，此处为 TTBox 自己的实现。
 #pragma once
 
 namespace ttbox::core::aim {

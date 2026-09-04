@@ -1,7 +1,7 @@
 # TTBOX usbproxy
 
-TTBOX 自研 USB 鼠标代理 —— **1:1 复刻 YU usb-proxy**（raw-gadget + libusb），
-让 TTBOX 完全摆脱对 YU 加密 usb-proxy 与 AI 注入后端的运行时依赖。
+TTBOX 自研 USB 鼠标代理（raw-gadget + libusb），
+让 TTBOX 独立完成 AI → HID 鼠标注入全链路。
 
 ```
 AI (MOVE_CMD) ──▶ cmd.sock ──▶ usbproxy ──▶ Raw Gadget ──▶ HID ──▶ PC 鼠标
@@ -21,14 +21,14 @@ AI (MOVE_CMD) ──▶ cmd.sock ──▶ usbproxy ──▶ Raw Gadget ──�
 |---|---|
 | `usb-proxy.cpp` | 主入口：参数解析、模式分发、mouse_control 启动 |
 | `proxy.cpp` | raw-gadget 端点转发 + `mouse_control_merge_report`（AI 搭车合并） |
-| `mouse_control.cpp/.hpp` | cmd.sock/event.sock 协议层（0x4F50，15 种消息全对齐 YU） |
+| `mouse_control.cpp/.hpp` | cmd.sock/event.sock 协议层（0x4F50，15 种消息） |
 | `synthetic.cpp/.h` | synthetic 模式：合成描述符 + RT 注入线程（SCHED_FIFO 98 + CPU affinity） |
 | `board/run-ttbox-usb-proxy.sh` | 启动脚本（full 模式自动探测物理鼠标） |
 | `systemd/ttbox-usbproxy.service` | systemd 托管（Restart=always，自愈） |
 | `gadget-config.json` | synthetic 身份配置 |
 | `Makefile` | 板端编译 |
 
-## 协议（与 YU 逐字节对齐）
+## 协议（自研二进制协议）
 
 - 传输：Unix `SOCK_SEQPACKET`，`/run/orangepi-mouse-passthrough/`
 - 包头：`<HBBI` = magic 0x4F50 / version 1 / type / request_id
@@ -37,9 +37,9 @@ AI (MOVE_CMD) ──▶ cmd.sock ──▶ usbproxy ──▶ Raw Gadget ──�
 - GET_STATE 6/7、SUBSCRIBE 8/9、SNAPSHOT 10 `<BQ`、BUTTON_EVENT 11 `<BBBQ`
 - CONFIG 12-15：`<HHHHBBBHBBBB`（max_power 为 u16）+ 5 字符串
 
-## 已对齐的 3 项 YU 差异
+## 3 项关键实现细节
 
-1. **event.sock 逐字节对齐**（逐按钮 BUTTON_EVENT，以 YU 客户端为准）
+1. **event 通道逐按钮事件**（BUTTON_EVENT 按单按钮推送，带按下状态与时间戳）
 2. **SET_CONFIG apply-now** = `_exit(0)`，由 systemd `Restart=always` 重启重枚举
 3. **RT 调度**：注入/event/cmd 线程 SCHED_FIFO 98 + CPU affinity（大核）
 

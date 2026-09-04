@@ -61,7 +61,7 @@ struct ModelManifest {
     uint32_t output_count = 0;
     uint32_t class_count = 0;
     std::vector<std::string> class_names;
-    uint32_t rknn_concurrency = 1;  // NPU 并发（YU 语义 1~3，映射 worker_cores）
+    uint32_t rknn_concurrency = 1;  // NPU 并发（1~3，映射 worker_cores）
 
     JsonValue to_json() const;
     static ModelManifest from_json(const JsonValue& v);

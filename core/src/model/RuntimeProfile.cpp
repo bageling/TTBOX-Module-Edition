@@ -6,11 +6,11 @@
  *
  * 作用：
  *   运行时配置文件的定义和翻译。
- *   定义所有可调参数，并在 YU 格式和 TTBOX 内部格式之间转换。
+ *   定义所有可调参数，并在配置格式和 TTBOX 内部格式之间转换。
  *
  * 小白理解：
  *   你在 Web 页面上看到的每个参数（置信度、截取尺寸、PID 参数等），
- *   都在这里定义。它还负责把 YU 格式的参数翻译成 TTBOX 内部格式。
+ *   都在这里定义。它还负责把配置格式的参数翻译成 TTBOX 内部格式。
  *
  * 注意：
  *   本注释仅用于说明代码，不改变程序逻辑。
@@ -268,7 +268,7 @@ JsonValue RuntimeProfile::to_json() const {
     m.set("deadzone_x", JsonValue::number(static_cast<double>(mouse.deadzone_x)));
     m.set("deadzone_y", JsonValue::number(static_cast<double>(mouse.deadzone_y)));
     m.set("smooth", JsonValue::number(static_cast<double>(mouse.smooth)));
-    // YU 对齐参数
+    // 对齐参数
     m.set("predict_x", JsonValue::number(static_cast<double>(mouse.predict_x)));
     m.set("predict_y", JsonValue::number(static_cast<double>(mouse.predict_y)));
     m.set("smooth_x", JsonValue::number(static_cast<double>(mouse.smooth_x)));
@@ -416,7 +416,7 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
         p.mouse.deadzone_x = static_cast<float>(obj_num(*m, "deadzone_x", 1.0));
         p.mouse.deadzone_y = static_cast<float>(obj_num(*m, "deadzone_y", 1.0));
         p.mouse.smooth = static_cast<float>(obj_num(*m, "smooth", 0.0));
-        // YU 对齐参数
+        // 对齐参数
         p.mouse.predict_x = static_cast<float>(obj_num(*m, "predict_x", 0.008));
         p.mouse.predict_y = static_cast<float>(obj_num(*m, "predict_y", 0.008));
         p.mouse.smooth_x = static_cast<float>(obj_num(*m, "smooth_x", 9900.0));

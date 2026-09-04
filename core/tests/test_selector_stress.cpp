@@ -156,7 +156,7 @@ TEST(selector_target_teleport_reattach) {
     CHECK(r2.target_id >= 0);
 }
 
-// YU 对齐：priority 排序 —— 启用优先级后，远处高优先目标胜过近处普通目标
+// priority 排序 —— 启用优先级后，远处高优先目标胜过近处普通目标
 TEST(selector_priority_classes_win) {
     TargetSelector sel;
     auto cfg = make_cfg();
@@ -174,7 +174,7 @@ TEST(selector_priority_classes_win) {
     CHECK_EQ(r.box.class_id, 5);
 }
 
-// YU 对齐：未启用 priority 时保持"距离最近优先"（兼容旧行为）
+// 未启用 priority 时保持"距离最近优先"（兼容旧行为）
 TEST(selector_priority_disabled_distance_wins) {
     TargetSelector sel;
     auto cfg = make_cfg();

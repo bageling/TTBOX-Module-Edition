@@ -1,9 +1,9 @@
-// OutputBackend.hpp — 统一输出后端抽象（对齐 YU 外设后端）
+// OutputBackend.hpp — 统一输出后端抽象（自研外设后端）
 //
 // 目标：AimThread 只产生 OutputAction（dx/dy/buttons），不判断设备类型。
 //       OutputBackend 作为 IHidOutput 的兼容实现，当前只含 LocalHidBackend。
 //
-// 设计依据：docs/research/YU_OUTPUT_BACKEND_RESEARCH.md（YU 真机实证）。
+// 设计依据：docs/research/OUTPUT_BACKEND_RESEARCH.md（真机实证）。
 // 纪律：
 //   - Hotkey Gate / mouse.enabled 实时判定逻辑保持与现 AiboxHidOutput 完全一致；
 //   - send() 热路径零分配、无锁、无日志；
@@ -49,7 +49,7 @@ struct BackendHealth {
 };
 
 // ---------------------------------------------------------------------------
-// 按钮/动作编码（对齐 YU usb-proxy 实证；各后端映射到自己协议）
+// 按钮/动作编码（自研；各后端映射到自己协议）
 // ---------------------------------------------------------------------------
 constexpr uint8_t kBtnLeft = 1;
 constexpr uint8_t kBtnRight = 2;

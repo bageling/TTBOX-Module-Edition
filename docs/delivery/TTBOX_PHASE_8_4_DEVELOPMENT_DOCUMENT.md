@@ -288,7 +288,7 @@ Phase 8.4 同步把原先的训练页面从假接口改成 TTBOX 自有能力。
 ### 文档与测试
 
 - `docs/architecture/TTBOX_CALIBRATION_BEHAVIOR_MODEL.md`
-- `docs/architecture/TTBOX_YU_REFERENCE_MAP.md`
+- `docs/architecture/TTBOX_REFERENCE_MAP.md`
 - `docs/architecture/TTBOX_PHASE_8_3_CODE_LINEAGE.md`
 - `docs/product/TTBOX_WEB_FEATURE_MATRIX.md`
 - `docs/product/features/personal-motion-training.md`
@@ -343,7 +343,7 @@ Phase 8.4 同步把原先的训练页面从假接口改成 TTBOX 自有能力。
 - 没有执行整机 reboot、shutdown 或 poweroff。
 - 没有修改网络、SSH、防火墙、内核或 BSP。
 - 只在允许范围内切换 TTBOX Core/Web 单服务。
-- 没有把 YU daemon、YU API 或 YU 配置接入 TTBOX 正式运行链。
+- 没有把外部 daemon、外部 API 或外部配置接入 TTBOX 正式运行链。
 - 真机正式代码来源仍是本地 Git 仓库；板端仅用于编译和验收。
 
 ---
@@ -371,6 +371,6 @@ Phase 8.4 已完成自动标定的行为级逆向、TTBOX 自有 Domain 建模�
 关联文档：
 
 - `docs/architecture/TTBOX_CALIBRATION_BEHAVIOR_MODEL.md`
-- `docs/architecture/TTBOX_YU_REFERENCE_MAP.md`
+- `docs/architecture/TTBOX_REFERENCE_MAP.md`
 - `docs/product/TTBOX_WEB_FEATURE_MATRIX.md`
 - `docs/product/features/personal-motion-training.md`

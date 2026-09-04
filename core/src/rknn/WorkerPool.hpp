@@ -48,8 +48,8 @@ struct DecodeStageStats {
 struct WorkerStats {
     std::atomic<uint64_t> processed{0};  // 成功完成解码的帧数
     std::atomic<uint64_t> rga_ok{0};
-    std::atomic<uint64_t> direct_ok{0};  // CPU 直拷帧数（YU cpu_direct 路径）
-    StatsCollector queue_wait;           // 排队等待（帧时间戳→worker 认领，YU buffer_age 同口径）
+    std::atomic<uint64_t> direct_ok{0};  // CPU 直拷帧数（cpu_direct 路径）
+    StatsCollector queue_wait;           // 排队等待（帧时间戳→worker 认领，buffer_age 同口径）
     std::atomic<uint64_t> inference_ok{0};
     std::atomic<uint64_t> decode_ok{0};
     std::atomic<uint64_t> published{0};

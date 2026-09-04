@@ -5,7 +5,7 @@
 
 namespace ttbox::core::auth {
 
-// 完全复刻原 aibox-bl 授权协议：
+// 自研授权客户端（兼容原 aibox-bl 授权协议）：
 //  - isPro=true  → POST https://blpro.antszy.com:443/api/v1/verifyCard
 //  - isPro=false → POST https://blpt.antszy.com:443/api/v1/verifyCard
 //  - user-data 访问 https://data.antszy.com:443/api/v1/user-data/...

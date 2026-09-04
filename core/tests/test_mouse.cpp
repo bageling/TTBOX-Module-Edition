@@ -460,7 +460,7 @@ TEST(mouse_router_parse_logitech_layout) {
 }
 
 // ---------------------------------------------------------------------------
-// YU 插件：PullCurve（拉枪曲线）/ ContinuousLead（持续提前量）/ Humanize（拟人）
+// 插件：PullCurve（拉枪曲线）/ ContinuousLead（持续提前量）/ Humanize（拟人）
 // ---------------------------------------------------------------------------
 TEST(mouse_yu_pull_curve_activates_only_beyond_min_distance) {
     aim::PullCurveConfig cfg;  // enabled=true min_distance=80 strength=0.8
@@ -511,7 +511,7 @@ TEST(mouse_yu_humanize_adds_jitter_only_when_enabled) {
 }
 
 // ---------------------------------------------------------------------------
-// YU 对齐：RuntimeProfile mouse 段序列化（predict/插件/自适应死区参数）
+// RuntimeProfile mouse 段序列化（predict/插件/自适应死区参数）
 // ---------------------------------------------------------------------------
 TEST(mouse_profile_yu_fields_roundtrip) {
     RuntimeProfile p;

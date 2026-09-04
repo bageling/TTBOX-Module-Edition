@@ -17,7 +17,7 @@ bool injection_enabled = false;
 std::string injection_file = "injection.json";
 Json::Value injection_config;
 
-// ── mouse_control（复刻 YU 通讯层）──
+// ── mouse_control（自研通讯层）──
 bool enable_mouse_control = false;
 bool synthetic_mode = false;
 std::string mouse_cmd_socket = "/run/orangepi-mouse-passthrough/cmd.sock";
@@ -624,7 +624,7 @@ int main(int argc, char **argv)
 		}
 	}
 
-	// 启动 mouse_control 通讯层（复刻 YU cmd.sock/event.sock）
+	// 启动 mouse_control 通讯层（自研 cmd.sock/event.sock）
 	if (enable_mouse_control) {
 		if (ttbox_usbproxy::mouse_control_start(
 				mouse_cmd_socket, mouse_event_socket, synthetic_mode) != 0) {

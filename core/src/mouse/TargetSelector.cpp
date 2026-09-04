@@ -51,7 +51,7 @@ std::vector<TargetSelector::Candidate> TargetSelector::collect_candidates(
         out.push_back({b, box_center_x(b), box_center_y(b), d_sq,
                        class_priority(cfg, b.class_id)});
     }
-    // YU 对齐排序：priority 高者优先，同 priority 按距离近者优先。
+    // 排序：priority 高者优先，同 priority 按距离近者优先。
     // （priority 用于"同距离竞争"时的目标优先级，不影响距离本身。）
     std::sort(out.begin(), out.end(),
               [](const Candidate& a, const Candidate& b) {

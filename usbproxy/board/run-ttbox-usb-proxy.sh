@@ -1,5 +1,5 @@
 #!/bin/sh
-# run-ttbox-usb-proxy.sh — TTBOX usb-proxy 启动脚本（复刻 YU run-usb-mouse-proxy.sh）
+# run-ttbox-usb-proxy.sh — TTBOX usb-proxy 启动脚本（自研）
 set -eu
 
 USB_PROXY_DEVICE=${USB_PROXY_DEVICE:-fc000000.usb}

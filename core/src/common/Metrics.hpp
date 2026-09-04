@@ -35,7 +35,7 @@ struct PipelineMetrics {
     double infer_p50_ms = 0.0, infer_p95_ms = 0.0, infer_p99_ms = 0.0;
     double decode_p50_ms = 0.0, decode_p95_ms = 0.0, decode_p99_ms = 0.0;
     size_t detect_count = 0;   // 最近一帧检测目标数（mailbox 最新任务）
-    uint32_t tracks = 0;       // 跟踪中的目标数（YU detection.tracks 同语义）
+    uint32_t tracks = 0;       // 跟踪中的目标数（detection.tracks 同语义）
     size_t dropped_frames = 0; // 丢弃帧数（latest-frame 语义，被新帧覆盖）
     uint64_t frames_total = 0; // 已发布帧总数（capture_frames）
     uint64_t infer_total = 0;  // 推理完成帧总数（worker published 累计）

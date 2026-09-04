@@ -55,7 +55,7 @@ void AimThread::loop() {
                     kp_x = profile->mouse.kp_x; kp_y = profile->mouse.kp_y;
                     kd_x = profile->mouse.kd_x; kd_y = profile->mouse.kd_y;
                     aim_point = profile->mouse.aim_point;
-                    // 输出链参数（YU 对齐）：sens 全局缩放 × output_scale × output_deadzone
+                    // 输出链参数：sens 全局缩放 × output_scale × output_deadzone
                     out_sensitivity = profile->mouse.sensitivity;
                     out_scale = profile->mouse.output_scale;
                     out_deadzone = profile->mouse.output_deadzone;
@@ -168,7 +168,7 @@ void AimThread::loop() {
                 // pid1.cpp P_PID：X predict=3.0，Y predict=0（main() 原始参数）。
                 aibox_x = static_cast<float>(pid_x_.update(control_x));
                 aibox_y = static_cast<float>(pid_y_.update(control_y));
-                // 输出链（YU 对齐）：P_PID 输出 × sens（全局灵敏度） × output_scale。
+                // 输出链：P_PID 输出 × sens（全局灵敏度） × output_scale。
                 // rate_x/y 已在 Pid1 内部作为 kp_gain_rate 消费，此处不再重复。
                 const float out_gain = out_sensitivity * out_scale;
                 scaled_x = aibox_x * out_gain;
@@ -178,7 +178,7 @@ void AimThread::loop() {
                 const float personal_gain = PersonalMotion{}.scale(personal_distance, personal_motion);
                 scaled_x *= personal_gain;
                 scaled_y *= personal_gain;
-                // output_deadzone（YU 自适应死区基准）：低于死区的输出归零（防微抖）。
+                // output_deadzone（自适应死区基准）：低于死区的输出归零（防微抖）。
                 if (std::abs(scaled_x) < out_deadzone) scaled_x = 0.0f;
                 if (std::abs(scaled_y) < out_deadzone) scaled_y = 0.0f;
                 // 保留小数余量，避免小幅连续误差被整数 HID count 截断。

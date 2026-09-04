@@ -1,8 +1,8 @@
-// PullCurve.hpp — YU 拉枪曲线插件（自瞄时附加弧线 + 抖动）
+// PullCurve.hpp — 拉枪曲线插件（自瞄时附加弧线 + 抖动）
 //
-// 对齐 YU trace 行为：目标误差距离 ≥ min_distance 时激活，
+// 设计：目标误差距离 ≥ min_distance 时激活，
 // 在拉枪方向（X 主导）附加垂直弧线，并在 Y 上叠加抖动。
-// 由 AimThread 在 deadzone 之前调用（对齐 YU 输出链顺序）。
+// 由 AimThread 在 deadzone 之前调用（输出链顺序）。
 #pragma once
 
 #include <cmath>

@@ -2,9 +2,9 @@
 
 ## 项目定位
 
-TTBOX 是**独立产品**，不是 YU 的兼容版，不是 AIBox 的复刻版。
+TTBOX 是**完全自研的独立产品**。
 
-历史项目（YU / AIBox）只提供产品设计参考，不参与 TTBOX 架构定义。
+历史项目仅提供产品设计参考，不参与 TTBOX 架构定义。
 
 ## 核心原则
 
@@ -32,7 +32,7 @@ TTBOX 是**独立产品**，不是 YU 的兼容版，不是 AIBox 的复刻版�
 ## Phase 8.4 自动标定交接
 
 - 行为模型：`docs/architecture/TTBOX_CALIBRATION_BEHAVIOR_MODEL.md`
-- 参考映射：`docs/architecture/TTBOX_YU_REFERENCE_MAP.md`
+- 参考映射：`docs/architecture/TTBOX_REFERENCE_MAP.md`
 - TTBOX 自动标定按自己的 Calibration Domain 实现：Core 输出目标 ID、类别、中心和框尺寸；Gateway 使用显式状态机执行分轴采样、Median/MAD 拟合、验证和应用。
 - 当前真机状态：`ttbox-core`、`ttbox-web`、`ttbox-release-manager` 均 active；本阶段仅重启对应 TTBOX 应用服务，没有执行整机重启。
 - 当前真实验证边界：无 HDMI 真实目标时，自动标定完整动作链只能验证状态读取、真实拒绝和取消恢复；完整 `completed` 仍需真实目标场景。

@@ -195,7 +195,7 @@ static void test_low_confidence() {
 }
 
 // 测试7：坐标转换 — 已知输入，输出必须与预期完全一致
-// 复刻 test_coordinate_transform 的确定性用例：box(90,40,110,140) aim_point(0.5,0.15)
+// 复用 test_coordinate_transform 的确定性用例：box(90,40,110,140) aim_point(0.5,0.15)
 // aim_offset(10,-5)，roi 200x200 → 期望 error=(-10,-40)
 static void test_coordinate() {
     AimPointProfile p;

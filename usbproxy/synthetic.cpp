@@ -1,5 +1,5 @@
 // synthetic.cpp — TTBOX usb-proxy synthetic 模式
-// 复刻 YU --synthetic_mouse：无物理鼠标，暴露一个 Corsair HID 鼠标 gadget，
+// 自研 synthetic 模式：无物理鼠标，暴露一个 Corsair HID 鼠标 gadget，
 // AI MOVE 经 mouse_control 协议直接注入。
 #include "synthetic.h"
 #include "mouse_control.h"
@@ -15,7 +15,7 @@
 using ttbox_usbproxy::g_gadget_config;
 using ttbox_usbproxy::g_state;
 
-// 对齐 YU RT 调度（定义在 mouse_control.cpp）
+// RT 调度（定义在 mouse_control.cpp）
 void apply_rt_thread_policy();
 
 // host 侧合成描述符（setup_host_usb_desc 的 synthetic 版本）
@@ -82,7 +82,7 @@ int setup_synthetic_gadget_desc() {
     if (!cfg_path) cfg_path = "/opt/ttbox/usbproxy/gadget-config.json";
     if (load_gadget_config(cfg_path) != 0) return -1;
 
-    // 与 YU synthetic 一致：9a80:7072（gadget-config.json 缺省值即 Corsair）
+    // 9a80:7072（gadget-config.json 缺省值即 Corsair）
     g_synth.dev.bLength = sizeof(struct usb_device_descriptor);
     g_synth.dev.bDescriptorType = USB_DT_DEVICE;
     g_synth.dev.bcdUSB = g_gadget_config.usb_bcd_usb;
@@ -134,12 +134,12 @@ int setup_synthetic_gadget_desc() {
 }
 
 // ── 注入线程：周期性把挂起 AI 位移写入合成端点 ──
-// 复刻 YU synthetic："pure gadget endpoint; physical overlay is optional"。
+// synthetic 设计："pure gadget endpoint; physical overlay is optional"。
 // 由 usb-proxy.cpp 在 ep0_loop 前启动，通过 ep 全局写入。
 // 为避免与 proxy.cpp 端点线程耦合，注入走独立路径：每 1ms 轮询挂起位移。
 void* synthetic_injector_thread(void* arg) {
     (void)arg;
-    apply_rt_thread_policy();  // 对齐 YU：realtime=fifo:98 + CPU affinity
+    apply_rt_thread_policy();  // RT：realtime=fifo:98 + CPU affinity
     int ep_num = g_synth_ep_num;
     int fd = g_synth_fd;
     printf("synthetic_injector: ep_num=%d (rt)\n", ep_num);

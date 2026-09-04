@@ -1,4 +1,4 @@
-# 2026-09-02 YU 兼容测试记录
+# 2026-09-02 兼容测试记录
 
 ## 执行环境
 
@@ -6,7 +6,7 @@
 - 真机：`192.168.0.53`
 - TTBOX Core：active
 - TTBOX Web：active
-- YU 服务：本轮未启动、不接入 TTBOX
+- 外部服务：本轮未启动、不接入 TTBOX
 
 ## 已执行验证
 
@@ -63,5 +63,5 @@ status=planned
 
 - API 返回成功只证明 API 成功，不证明设备行为。
 - `systemd active` 只证明服务进程运行，不证明目标选择或 HID 闭环。
-- 当前 `class_id=3` 仍是 TTBOX 模型自己的 `enemy_2`，不能映射成 YU 类别。
+- 当前 `class_id=3` 仍是 TTBOX 模型自己的 `enemy_2`，不映射外部类别。
 - 当前只有一个局部 DetectionBox，不能伪造完整人体框。

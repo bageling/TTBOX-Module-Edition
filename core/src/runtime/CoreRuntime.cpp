@@ -93,10 +93,10 @@ bool CoreRuntime::start(std::string* error) {
         std::string perr;
         preview_ = std::make_unique<PreviewModule>();
         PreviewModule::Params pp = preview_params_;
-        pp.runtime_config = runtime_config_;  // 预览跟随截取区域（capture ROI，YU 同款语义）
+        pp.runtime_config = runtime_config_;  // 预览跟随截取区域（capture ROI）
         // 预览帧率热配置：runtime_profile.preview.fps > 0 时覆盖 config 默认值
         // （yu latency.preview_interval_ms 经网关/bridge 翻译为 preview.fps）
-        // 输出尺寸对齐 YU：有 ROI 时 1:1 输出 ROI 尺寸（不拉伸），无 ROI 保持 config 默认
+        // 输出尺寸：有 ROI 时 1:1 输出 ROI 尺寸（不拉伸），无 ROI 保持 config 默认
         if (runtime_config_) {
             if (auto snap = runtime_config_->snapshot()) {
                 if (snap->preview.fps > 0 && snap->preview.fps <= 60) {
@@ -156,7 +156,7 @@ void CoreRuntime::collect_metrics(PipelineMetrics* out) const {
         out->frames_total = cm.capture_frames.load();
         out->dropped_frames = cm.dropped_latest_frames.load();
         out->capture_fps = cm.capture_fps.load();
-        // 采集排队（YU buffer_age 同口径）：
+        // 采集排队（buffer_age 同口径）：
         //   buffer_age_ms = worker 认领等待（帧时间戳 → 认领，真实排队时间）
         //   last_dequeued_count = 已 DQBUF 未归还的 buffer 数；buffer_count = 驱动 buffer 总数
         out->last_dequeued_count = capture_->in_use_count();
@@ -211,7 +211,7 @@ void CoreRuntime::collect_metrics(PipelineMetrics* out) const {
         out->decode_ms = decode_avg_us / static_cast<double>(n) / 1000.0;
         out->e2e_ms = e2e_avg_us / static_cast<double>(n) / 1000.0;
         out->resize_ms = convert_avg_us / static_cast<double>(n) / 1000.0;
-        out->buffer_age_ms = qwait_avg_us / static_cast<double>(n) / 1000.0;  // YU 口径：排队等待
+        out->buffer_age_ms = qwait_avg_us / static_cast<double>(n) / 1000.0;  // 口径：排队等待
         // 真实分位数（us → ms；无样本时 percentile 返回 0）
         out->e2e_p50_ms = e2e_all.percentile(50) / 1000.0;
         out->e2e_p95_ms = e2e_all.percentile(95) / 1000.0;
@@ -231,7 +231,7 @@ void CoreRuntime::collect_metrics(PipelineMetrics* out) const {
             out->detect_count = task.detections.size();
         }
     }
-    // YU 同语义 tracks：当前跟踪中的目标数（AimThread 实时状态）
+    // tracks 同语义：当前跟踪中的目标数（AimThread 实时状态）
     out->tracks = aim_thread_.status().tracks;
     const auto ast = aim_thread_.status();
     out->aim_error_x = ast.error_x;

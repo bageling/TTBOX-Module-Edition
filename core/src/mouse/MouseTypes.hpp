@@ -80,15 +80,15 @@ struct AimPointProfile {
     int switch_delay_ms = 30;   // 类别偏移切换延迟（未启用前仅记录）
 };
 
-// 拉枪曲线（pull_curve，YU：目标距离 ≥ min_distance 时在拉枪方向附加弧线/抖动）
+// 拉枪曲线（pull_curve：目标距离 ≥ min_distance 时在拉枪方向附加弧线/抖动）
 struct PullCurveConfig {
     bool enabled = true;
-    float strength = 0.8f;       // 弧线强度（YU 0.8）
+    float strength = 0.8f;       // 弧线强度（0.8）
     float jitter_px = 3.0f;      // 抖动幅度 px
     float min_distance = 80.0f;  // 激活距离（crop 系 px）
 };
 
-// 持续提前量（continuous_lead，YU：AI 输出同向累计超 enter 后附加 X 偏置，渐入渐出）
+// 持续提前量（continuous_lead：AI 输出同向累计超 enter 后附加 X 偏置，渐入渐出）
 struct ContinuousLeadConfig {
     bool enabled = false;
     float enter_distance = 150.0f;      // 触发累计距离
@@ -98,7 +98,7 @@ struct ContinuousLeadConfig {
     float near_disable_ratio = 0.66f;   // 目标接近时衰减比例（保留字段）
 };
 
-// 拟人化（humanize，YU：目标输出附加抖动 + 曲线平滑，用于压枪与瞄准共用）
+// 拟人化（humanize：目标输出附加抖动 + 曲线平滑，用于压枪与瞄准共用）
 struct HumanizeConfig {
     bool enabled = true;
     float curve_strength = 0.45f;  // 曲线混合强度
@@ -156,15 +156,15 @@ struct MouseProfile {
     float predict_dt_ms = 50.0f;                 // 目标提前预测时间             // 输入→画面响应延迟（标定测得）
     float deadzone_x = 1.0f;                    // X 死区（count，|v|<dz → 0）
     float deadzone_y = 1.0f;
-    float smooth = 0.0f;                        // 平滑低通 alpha（0~1；0=关闭；TTBox 自实现，非 YU 公式）
-    // YU 对齐：controller 公式（kp×rate×err + predict×vel）与输出链参数
+    float smooth = 0.0f;                        // 平滑低通 alpha（0~1；0=关闭；TTBox 自实现）
+    // controller 公式（kp×rate×err + predict×vel）与输出链参数
     float predict_x = 0.008f;                   // 预测提前量（秒，≈1 帧@125Hz；旧值 0.5s 会在
                                                 // 速度 clamp 下产生 1250px 提前量 → 转圈，已修）
     float predict_y = 0.008f;
-    float smooth_x = 9900.0f;                   // YU smooth（9900≈不过滤；TTBox 用 smooth 0~1 兼容）
+    float smooth_x = 9900.0f;                   // smooth 参考值（9900≈不过滤；TTBox 用 smooth 0~1 兼容）
     float smooth_y = 9900.0f;
-    float output_deadzone = 1.0f;               // YU output_deadzone（自适应死区基准）
-    float selector_search_radius = 170.0f;      // YU selector_search_radius
+    float output_deadzone = 1.0f;               // output_deadzone（自适应死区基准）
+    float selector_search_radius = 170.0f;      // selector_search_radius
     bool aim_fire_lock_y = false;               // 开火锁 Y
     int y_axis_fire_hotkey = 0x01;              // 开火热键位掩码（1=left）
     float y_axis_fire_release_delay_sec = 0.3f; // 开火锁 Y 释放延迟

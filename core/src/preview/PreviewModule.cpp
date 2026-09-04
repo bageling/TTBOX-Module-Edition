@@ -176,7 +176,7 @@ void PreviewModule::loop() {
                         cy - static_cast<int32_t>(rh / 2), static_cast<int32_t>(fh - rh)));
                     if (rx != applied_roi_x_ || ry != applied_roi_y_ ||
                         rw != applied_roi_w_ || rh != applied_roi_h_) {
-                        // YU 语义：预览输出尺寸 = 截取尺寸（1:1，不拉伸）。
+                        // 设计：预览输出尺寸 = 截取尺寸（1:1，不拉伸）。
                         // 尺寸变化时重建 RGA 输出 buffer（含 set_roi）；仅偏移变化只 set_roi。
                         if (rw != applied_roi_w_ || rh != applied_roi_h_) {
                             RgaProcessor::Params rp;
@@ -234,7 +234,7 @@ bool PreviewModule::encode_frame(const FrameBuffer& frame, std::vector<uint8_t>*
         if (error) *error = "帧尺寸无效";
         return false;
     }
-    // CPU 直拷优先（YU ultra 同款）：mmap va 行抽取 ROI → JPEG，完全避开 RGA 撕裂/花屏。
+    // CPU 直拷优先（ultra 同款）：mmap va 行抽取 ROI → JPEG，完全避开 RGA 撕裂/花屏。
     if (frame.info.cpu_va != nullptr && applied_roi_w_ > 0 && applied_roi_h_ > 0) {
         const uint8_t* base = static_cast<const uint8_t*>(frame.info.cpu_va);
         const uint32_t sstride = frame.info.stride;

@@ -244,7 +244,7 @@ if(TTBOX_CORE_BUILD_TESTS)
   target_link_libraries(test_aim_thread PRIVATE ttbox_core)
   add_test(NAME test_aim_thread COMMAND test_aim_thread)
 
-  # pid1.cpp P_PID 1:1 移植对照测试（与参考实现输出逐点一致）
+  # P_PID 对照测试（与参考实现输出逐点一致）
   add_executable(test_pid1 tests/test_pid1.cpp)
   target_link_libraries(test_pid1 PRIVATE ttbox_core)
   add_test(NAME test_pid1 COMMAND test_pid1)
