@@ -6038,9 +6038,20 @@ function renderRuntime(payload) {
   if (preview) {
     const src = runtime.preview_path || "/api/preview.mjpg";
     preview.style.visibility = "visible";
-    if (preview.dataset.src !== src) {
+    // 服务从停止→运行（或 running 状态翻转）时，MJPEG 流连接可能已断开（黑屏）。
+    // 强制重设 src 触发浏览器重新建立 multipart 流连接。
+    const wasRunning = preview.dataset.running === "1";
+    const nowRunning = !!runtime.running;
+    if (preview.dataset.src !== src || (wasRunning !== nowRunning && nowRunning)) {
       preview.dataset.src = src;
-      preview.src = src;
+      preview.dataset.running = nowRunning ? "1" : "0";
+      const oldSrc = preview.src;
+      preview.src = "";
+      // 下一帧刷新时重设 src，确保浏览器重新发起 MJPEG 请求
+      requestAnimationFrame(() => {
+        if (preview.dataset.src === src) preview.src = src;
+        else preview.src = oldSrc;
+      });
     }
   }
   updateAimRangeOverlay();
@@ -10619,20 +10630,36 @@ function bindEvents() {
       await refreshLicenseStatus();
       await refreshAll();
     }
-    const path = shouldStop ? "/api/control/stop" : "/api/control/start";
-    const nextRuntime = await api(path, { method: "POST" });
-    if (state.data) {
-      state.data.state = {
-        ...runtime,
-        ...nextRuntime,
-        license: nextRuntime.license || runtime.license,
-        core: nextRuntime.core || runtime.core,
-      };
-      if (shouldStop) {
-        state.data.state.running = false;
-        state.data.state.status = "stopped";
+    const button = $("startButton");
+    if (button) {
+      // 即时反馈：点击后立即进入 pending 态（按钮禁用+文案），不等 1.5s 轮询
+      button.disabled = true;
+      const label = button.querySelector("strong");
+      if (label) label.textContent = shouldStop ? "停止中…" : "启动中…";
+    }
+    try {
+      const path = shouldStop ? "/api/control/stop" : "/api/control/start";
+      const nextRuntime = await api(path, { method: "POST" });
+      if (state.data) {
+        state.data.state = {
+          ...runtime,
+          ...nextRuntime,
+          license: nextRuntime.license || runtime.license,
+          core: nextRuntime.core || runtime.core,
+        };
+        if (shouldStop) {
+          state.data.state.running = false;
+          state.data.state.status = "stopped";
+        }
+        renderRuntime(state.data);
       }
-      renderRuntime(state.data);
+    } finally {
+      // 无论成功失败，恢复按钮可用（下一次 renderRuntime 会刷新正确状态）
+      if (button) {
+        button.disabled = false;
+        const label = button.querySelector("strong");
+        if (label) label.textContent = shouldStop ? "停止" : "启动";
+      }
     }
   }));
 

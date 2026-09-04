@@ -6246,7 +6246,8 @@ html[data-theme="light"] .auto-calibration-progress {
 }
 
 @media (min-width: 921px) {
-  html[data-ui-brand="yu"][data-visual-theme="default"] #home-page .dashboard-grid {
+  html[data-ui-brand="yu"][data-visual-theme="default"],
+  html[data-ui-brand="ttbox"][data-visual-theme="default"] #home-page .dashboard-grid {
     grid-template-columns: minmax(280px, 430px) minmax(0, 1fr);
     grid-template-areas:
       "preview data"
@@ -6255,11 +6256,13 @@ html[data-theme="light"] .auto-calibration-progress {
       "hardware hardware";
   }
 
-  html[data-ui-brand="yu"][data-visual-theme="default"] #home-page .preview-panel {
+  html[data-ui-brand="yu"][data-visual-theme="default"],
+  html[data-ui-brand="ttbox"][data-visual-theme="default"] #home-page .preview-panel {
     max-width: none;
   }
 
-  html[data-ui-brand="yu"][data-visual-theme="default"] #home-page .dashboard-data {
+  html[data-ui-brand="yu"][data-visual-theme="default"],
+  html[data-ui-brand="ttbox"][data-visual-theme="default"] #home-page .dashboard-data {
     display: grid;
     grid-area: data;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -6268,76 +6271,90 @@ html[data-theme="light"] .auto-calibration-progress {
     min-width: 0;
   }
 
-  html[data-ui-brand="yu"][data-visual-theme="default"] #home-page .dashboard-data-head {
+  html[data-ui-brand="yu"][data-visual-theme="default"],
+  html[data-ui-brand="ttbox"][data-visual-theme="default"] #home-page .dashboard-data-head {
     display: flex;
     grid-column: 1 / -1;
     align-items: baseline;
     gap: 10px;
   }
 
-  html[data-ui-brand="yu"][data-visual-theme="default"] #home-page .dashboard-data .quick-metrics {
+  html[data-ui-brand="yu"][data-visual-theme="default"],
+  html[data-ui-brand="ttbox"][data-visual-theme="default"] #home-page .dashboard-data .quick-metrics {
     display: contents;
     grid-area: auto;
   }
 
-  html[data-ui-brand="yu"][data-visual-theme="default"] #home-page .dashboard-data-runtime {
+  html[data-ui-brand="yu"][data-visual-theme="default"],
+  html[data-ui-brand="ttbox"][data-visual-theme="default"] #home-page .dashboard-data-runtime {
     display: contents;
     grid-area: auto;
   }
 
-  html[data-ui-brand="yu"][data-visual-theme="default"] #home-page .quick-metrics > div:nth-child(1) {
+  html[data-ui-brand="yu"][data-visual-theme="default"],
+  html[data-ui-brand="ttbox"][data-visual-theme="default"] #home-page .quick-metrics > div:nth-child(1) {
     grid-column: 1;
     grid-row: 2;
   }
 
-  html[data-ui-brand="yu"][data-visual-theme="default"] #home-page .quick-metrics > div:nth-child(2) {
+  html[data-ui-brand="yu"][data-visual-theme="default"],
+  html[data-ui-brand="ttbox"][data-visual-theme="default"] #home-page .quick-metrics > div:nth-child(2) {
     grid-column: 2;
     grid-row: 2;
   }
 
-  html[data-ui-brand="yu"][data-visual-theme="default"] #home-page .quick-metrics > div:nth-child(3) {
+  html[data-ui-brand="yu"][data-visual-theme="default"],
+  html[data-ui-brand="ttbox"][data-visual-theme="default"] #home-page .quick-metrics > div:nth-child(3) {
     grid-column: 1;
     grid-row: 3;
   }
 
-  html[data-ui-brand="yu"][data-visual-theme="default"] #home-page .quick-metrics > div:nth-child(4) {
+  html[data-ui-brand="yu"][data-visual-theme="default"],
+  html[data-ui-brand="ttbox"][data-visual-theme="default"] #home-page .quick-metrics > div:nth-child(4) {
     grid-column: 2;
     grid-row: 3;
   }
 
-  html[data-ui-brand="yu"][data-visual-theme="default"] #home-page .quick-metrics > div:nth-child(5) {
+  html[data-ui-brand="yu"][data-visual-theme="default"],
+  html[data-ui-brand="ttbox"][data-visual-theme="default"] #home-page .quick-metrics > div:nth-child(5) {
     grid-column: 1;
     grid-row: 4;
   }
 
-  html[data-ui-brand="yu"][data-visual-theme="default"] #home-page .dashboard-data-runtime > .runtime-stat:nth-child(1) {
+  html[data-ui-brand="yu"][data-visual-theme="default"],
+  html[data-ui-brand="ttbox"][data-visual-theme="default"] #home-page .dashboard-data-runtime > .runtime-stat:nth-child(1) {
     grid-column: 1;
     grid-row: 5;
   }
 
-  html[data-ui-brand="yu"][data-visual-theme="default"] #home-page .dashboard-data-runtime > .runtime-stat:nth-child(2) {
+  html[data-ui-brand="yu"][data-visual-theme="default"],
+  html[data-ui-brand="ttbox"][data-visual-theme="default"] #home-page .dashboard-data-runtime > .runtime-stat:nth-child(2) {
     grid-column: 2;
     grid-row: 4;
   }
 
-  html[data-ui-brand="yu"][data-visual-theme="default"] #home-page .dashboard-data-runtime > .runtime-stat:nth-child(3) {
+  html[data-ui-brand="yu"][data-visual-theme="default"],
+  html[data-ui-brand="ttbox"][data-visual-theme="default"] #home-page .dashboard-data-runtime > .runtime-stat:nth-child(3) {
     grid-column: 1;
     grid-row: 6;
   }
 
-  html[data-ui-brand="yu"][data-visual-theme="default"] #home-page .dashboard-data-runtime > .runtime-stat:nth-child(4) {
+  html[data-ui-brand="yu"][data-visual-theme="default"],
+  html[data-ui-brand="ttbox"][data-visual-theme="default"] #home-page .dashboard-data-runtime > .runtime-stat:nth-child(4) {
     grid-column: 2;
     grid-row: 5;
   }
 
-  html[data-ui-brand="yu"][data-visual-theme="default"] #home-page .dashboard-data-runtime > .runtime-stat:nth-child(5) {
+  html[data-ui-brand="yu"][data-visual-theme="default"],
+  html[data-ui-brand="ttbox"][data-visual-theme="default"] #home-page .dashboard-data-runtime > .runtime-stat:nth-child(5) {
     grid-column: 2;
     grid-row: 6;
   }
 }
 
 @media (min-width: 1360px) {
-  html[data-ui-brand="yu"][data-visual-theme="default"] #home-page .dashboard-grid {
+  html[data-ui-brand="yu"][data-visual-theme="default"],
+  html[data-ui-brand="ttbox"][data-visual-theme="default"] #home-page .dashboard-grid {
     grid-template-columns: minmax(300px, 0.95fr) minmax(320px, 1fr) minmax(300px, 0.95fr);
     grid-template-areas:
       "preview data control"
@@ -6346,7 +6363,8 @@ html[data-theme="light"] .auto-calibration-progress {
       "hardware hardware hardware";
   }
 
-  html[data-ui-brand="yu"][data-visual-theme="default"] #home-page .hero-control {
+  html[data-ui-brand="yu"][data-visual-theme="default"],
+  html[data-ui-brand="ttbox"][data-visual-theme="default"] #home-page .hero-control {
     align-self: stretch;
   }
 }
