@@ -746,7 +746,19 @@ JsonValue Application::handle_model_list() {
         arr.push_back(m.to_json());
     }
     data.set("models", std::move(arr));
-    data.set("active", JsonValue::string(reg.active_model()));
+    // active 以 config.model_path 实际加载模型为准（WorkerPool 从 config 读模型），
+    // 避免 registry active 与真实推理模型脱节（F004 修复）。
+    const std::string cfg_label = config_.get_string("model_label", "");
+    const std::string cfg_path = config_.get_string("model_path", "");
+    std::string active = reg.active_model();
+    if (!cfg_label.empty()) {
+        active = cfg_label;
+    } else if (!cfg_path.empty()) {
+        // 从路径末尾取模型名（/models/<label>/<label>.rknn）
+        const auto pos = cfg_path.rfind('/');
+        active = (pos == std::string::npos) ? cfg_path : cfg_path.substr(pos + 1);
+    }
+    data.set("active", JsonValue::string(active));
     data.set("available", JsonValue::boolean(true));
     return data;
 }
