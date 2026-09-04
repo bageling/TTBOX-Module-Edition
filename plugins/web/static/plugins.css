@@ -1,0 +1,43 @@
+/* 插件中心补充样式：仅定义主 style.css 中不存在的状态/布局类，复用其设计变量 */
+.pill.is-ok {
+  color: var(--green);
+  border-color: rgba(148, 230, 172, 0.35);
+  background: rgba(148, 230, 172, 0.08);
+}
+.pill.is-bad {
+  color: var(--red);
+  border-color: rgba(255, 105, 127, 0.4);
+  background: rgba(255, 105, 127, 0.08);
+}
+.pill.is-warn {
+  color: var(--amber);
+  border-color: rgba(242, 198, 109, 0.4);
+  background: rgba(242, 198, 109, 0.08);
+}
+.pill.is-muted {
+  color: var(--muted);
+  border-color: var(--line);
+  background: transparent;
+}
+.plugin-card {
+  cursor: default;
+}
+.plugin-card .module-title {
+  margin-bottom: 4px;
+}
+.plugin-card .module-title h3 {
+  font-size: 15px;
+  font-weight: 600;
+}
+.model-meta {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 2px 0 10px;
+  line-height: 1.5;
+}
+.model-desc {
+  font-size: 12px;
+  color: var(--muted-strong);
+  margin: 8px 0 0;
+  line-height: 1.5;
+}
