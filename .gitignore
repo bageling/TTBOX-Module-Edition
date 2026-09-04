@@ -49,8 +49,19 @@ pid_trace*.csv
 *.pth
 *.onnx
 *.rknn
-# 临时 jpg 预览
-hdmi_preview_live2.jpg
+# 测试截图/预览/中间产物（不入库）
+*.bgr
+*.bmp
+core/tests/*.jpg
+core/tests/*.png
+core/tests/*.csv
+core/tests/*.bin
+core/tests/preview_raw.bin
+core/tests/s*.log
+core/tests/*_mouse.log
+core/tests/*_traj.log
+core/tests/hf_*.log
+core/tests/*.raw
 
 # ---------- 备份与临时 ----------
 *.bak

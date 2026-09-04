@@ -1,7 +1,7 @@
 # TTBOX-模块版（TTBOX-Module-Edition）
 
-> 一个模块化、可插拔、可维护的 **RK3588 AI 视觉盒子基础平台**。
-> 通过 HDMI "看"电脑屏幕，用 AI 识别画面中的目标。
+> 一个模块化、可插拔、可维护的 **RK3588 AI 视觉盒子**。
+> 通过 HDMI "看"电脑屏幕，用 AI 识别目标，并通过自研 usbproxy 完成 **AI → HID 鼠标注入全闭环**。
 
 ![系统一句话](docs/images/ttbox-one-line.png)
 
@@ -12,19 +12,25 @@
 TTBOX 是一台基于 **RK3588 芯片（OrangePi 5 Plus）** 的 AI 视觉盒子：
 
 ```
-电脑画面 ──HDMI线──▶ 盒子（RK3588）
-                       │
-                       ▼
-              AI 分析画面（每秒 43~142 帧）
-                       │
-                       ▼
-              "画面里有什么？目标在哪？"
-                       │
-                       ▼
-              目标选择 → 坐标 → 控制（可选，当前关闭）
+电脑画面 ──HDMI──▶ RK3588（盒子）
+                     │
+                     ▼
+        V4L2 采集 → RGA → RKNN NPU → DecodeNMS
+                     │
+                     ▼
+        TargetSelector → PID → AimThread
+                     │
+                     ▼
+        MouseControlClient → MOVE_CMD
+                     │
+                     ▼
+        TTBOX usbproxy → Raw Gadget → HID
+                     │
+                     ▼
+              Windows 鼠标真实移动
 ```
 
-**它解决什么问题**：用 AI 代替人眼，快速发现画面中的目标并定位。
+**它解决什么问题**：用 AI 代替人眼，快速发现画面中的目标并自动定位。
 **它不做什么**：不读内存、不看游戏数据——只"看"画面（外部视觉）。
 
 ---
@@ -38,19 +44,20 @@ TTBOX 是一台基于 **RK3588 芯片（OrangePi 5 Plus）** 的 AI 视觉盒子
 | 输入 | HDMI（电脑画面，2560×1440） |
 | AI 核心 | C++（ttbox_core，systemd 托管） |
 | 控制台 | Web 页面（Python 服务） |
-| 模型 | .rknn 格式（瑞芯微专用） |
+| 模型 | .rknn 格式（瑞芯微专用，默认 yolo261n COCO 80 类） |
+| 输出 | TTBOX usbproxy（raw-gadget + libusb，1:1 复刻 YU usb-proxy） |
 
 **两条线路（务必分清）**：
 - **HDMI**：画面从电脑 → 盒子（盒子的"眼睛"）
-- **USB**：指令从盒子 → 电脑（盒子的"手"，当前关闭）
-
-**USB 不是视频链路**，它只是盒子与电脑的独立连接（伪装鼠标键盘）。
+- **USB**：指令从盒子 → 电脑（盒子的"手"，TTBOX usbproxy 模拟鼠标）
 
 ---
 
 ## 当前完成到哪一步？
 
-### ✅ 已完成并验证
+### ✅ 已完成并真机验证（2026-09-04）
+
+**① AI 检测闭环（真实 HDMI 画面）**
 
 ```
 PC真实画面 → HDMI → RK3588 HDMI RX → /dev/video0
@@ -58,10 +65,29 @@ PC真实画面 → HDMI → RK3588 HDMI RX → /dev/video0
   → RGA 图像处理（裁剪+缩放）
   → RKNN NPU 推理（43.1 FPS）
   → DecodeNMS 解码（坐标误差 0.00）
-  → Detection 检测结果（person/car/bus，置信度 0.80~0.90）
+  → Detection 检测结果（person，持续锁定）
 ```
 
-### 📊 真实性能（2026-09-03 实测）
+**② AI → HID 鼠标注入全闭环（8 场景真机验证全 PASS）**
+
+```
+Detection → TargetSelector → PID → AimThread
+  → MouseControlClient → MOVE_CMD(0x4F50)
+  → TTBOX usbproxy cmd.sock
+  → HID report → Raw Gadget → Windows 真实光标移动
+```
+
+已验证场景：AI 关闭不注入 / 目标居中 / 目标左 / 目标右 / 目标上 / 目标下 / 热键关闭即停 / 100~2000Hz 高频 0 丢包。
+
+**③ TTBOX usbproxy（1:1 复刻 YU usb-proxy）**
+
+- 完全摆脱 YU 加密 usb-proxy 与 AI 注入后端，TTBOX 独立完成 AI→HID 全链路
+- full passthrough 模式：克隆 Logitech 046d:c53f，物理鼠标 + AI 位移搭车合并
+- synthetic 模式：独立合成 Corsair 9A80:7072 鼠标，AI 独立注入
+- 协议逐字节对齐：cmd.sock/event.sock 0x4F50 全 15 种消息
+- RT 调度：SCHED_FIFO 98 + CPU affinity，1000Hz 零丢失
+
+### 📊 真实性能（2026-09-03/04 实测）
 
 | 指标 | 值 |
 |---|---|
@@ -70,12 +96,14 @@ PC真实画面 → HDMI → RK3588 HDMI RX → /dev/video0
 | infer（推理） | **63.55 ms** |
 | decode（解码） | **5.39 ms** |
 | E2E（端到端） | **66.6 ms** |
+| 高频注入 | **100~2000Hz 全部 0 丢包、1:1 位移** |
 
-### ⛔ 保持关闭（安全红线）
+### ⛔ 安全红线（默认保持）
 
 - `output_enabled = false`
 - `injection_allowed = false`
-- 鼠标注入未开启
+- `mouse.enabled = false`
+- 开机不会自动注入鼠标；热键/开关关闭即时停止（fail-closed）
 
 ---
 
@@ -84,6 +112,8 @@ PC真实画面 → HDMI → RK3588 HDMI RX → /dev/video0
 ```
 TTBOX-Module-Edition/
 ├── core/          C++ 核心（AI 高速链路，真实源码）
+├── usbproxy/      ★ TTBOX usb-proxy（1:1 复刻 YU，raw-gadget+libusb）
+├── third_party/   第三方参考（YU usb-proxy 开发源码）
 ├── framework/     Python 框架（插件管理/配置/服务/安全）
 ├── plugins/       功能插件（web/preview/model/fan/wifi/...）
 ├── platform/      平台层（systemd/运行时/模型/健康）
@@ -94,6 +124,18 @@ TTBOX-Module-Edition/
 ├── ttbox_motion/  运动控制（校准/训练）
 └── docs/          ★ 文档中心（架构/教程/验证/AI/开发/规划）
 ```
+
+### usbproxy/ 内部结构
+
+| 文件 | 作用 |
+|---|---|
+| `usb-proxy.cpp` | 主入口（full/synthetic 双模式 + 参数解析） |
+| `proxy.cpp` | raw-gadget 端点转发 + AI 位移搭车合并注入 |
+| `mouse_control.cpp/.hpp` | cmd.sock/event.sock 0x4F50 协议层（15 种消息） |
+| `synthetic.cpp/.h` | synthetic 模式：合成鼠标描述符 + RT 注入线程 |
+| `board/run-ttbox-usb-proxy.sh` | 启动脚本（full 自动找物理鼠标） |
+| `systemd/ttbox-usbproxy.service` | systemd 托管（Restart=always） |
+| `gadget-config.json` | synthetic 身份配置（Corsair 9A80:7072） |
 
 ---
 
@@ -136,14 +178,14 @@ TTBOX-Module-Edition/
 ## 怎么运行？（板端）
 
 ```bash
-# 启动/停止/查看
+# AI 核心 + usbproxy 服务
 systemctl start ttbox-core.service
-systemctl status ttbox-core.service
+systemctl start ttbox-usbproxy.service
 
-# 手动运行（调试）
-/opt/ttbox/core/build/ttbox_core_main \
-  --config /opt/ttbox/config/default.json \
-  --ipc /tmp/ttbox_core.sock
+# 手动运行 usbproxy（调试）
+cd /opt/ttbox/usbproxy && ./usb-proxy \
+  --device=fc000000.usb --driver=dwc3-gadget \
+  --synthetic_mouse --enable_mouse_control
 
 # 查看实时状态
 /opt/ttbox/core/build/ipc_ping --type GET_STATUS
@@ -152,9 +194,12 @@ systemctl status ttbox-core.service
 ## 怎么编译？（开发者）
 
 ```bash
-# 板端（RK3588）
+# 板端（RK3588）AI 核心
 cd /opt/ttbox/core/build && cmake .. -DCMAKE_BUILD_TYPE=Release
 cmake --build . --target ttbox_core_main -j4
+
+# 板端 usbproxy
+cd /opt/ttbox/usbproxy && make
 
 # Windows（开发机）
 cmake -B core/build -S core
@@ -168,10 +213,11 @@ ctest --test-dir core/build -C Release
 
 | 层 | 技术 |
 |---|---|
-| 硬件 | RK3588（3 核 NPU）+ HDMI RX |
+| 硬件 | RK3588（3 核 NPU）+ HDMI RX + USB OTG |
 | AI | RKNN 模型 + rknnrt 运行时 |
 | 图像 | RGA 硬件加速（im2d） |
 | 采集 | V4L2 + DMA-BUF |
+| 鼠标注入 | raw-gadget + libusb（usbproxy） |
 | 核心 | C++17 |
 | 框架/Web | Python 3 + 插件架构 |
 | 构建 | CMake + CTest / pytest |
@@ -179,7 +225,9 @@ ctest --test-dir core/build -C Release
 ## 许可证
 
 本项目以 **MIT 许可证** 开源。详见 [LICENSE](LICENSE)。
+usbproxy/ 基于 Apache-2.0 的 [xairy/raw-gadget 示例 usb-proxy](third_party/yu-usb-proxy-src/) 复刻扩展，保留上游版权声明。
 
 ---
 
-*TTBOX-模块版 —— 让 AI 视觉盒子简单、清晰、可维护。*
+*TTBOX-模块版 —— 让 AI 视觉盒子简单、清晰、可维护，AI → HID 全闭环。*
+

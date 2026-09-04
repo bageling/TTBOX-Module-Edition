@@ -225,8 +225,7 @@ bool DecodeNMS::process_single(const RknnModelInfo& info,
     {
         const auto t0 = std::chrono::steady_clock::now();
         for (uint32_t a = 0; a < n_anchors; ++a) {
-            // 类别分数：yolo261n 后处理融合输出中类别通道已是 sigmoid 概率 (0,1)，
-            // 直接取 max/argmax（2026-09 实测：二次 sigmoid 会把 0.9 压到 0.71，高置信全挤向 0.5 → 假阳性 flood）。
+            // 类别分数：max + argmax（跳过 objectness 通道的索引偏移）
             const uint32_t cls_begin = has_objectness ? 5u : 4u;
             float best = -1.0f;
             int best_id = 0;
@@ -239,8 +238,7 @@ bool DecodeNMS::process_single(const RknnModelInfo& info,
             }
             if (has_objectness) {
                 const float obj = read_elem(oi, buf, static_cast<size_t>(4) * n_anchors + a);
-                const float obj_s = 1.0f / (1.0f + std::exp(-obj));
-                best *= obj_s;
+                best *= obj;
             }
             if (best < params_.conf_thres) continue;
 
