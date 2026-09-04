@@ -2951,70 +2951,11 @@ function getPreviewImageLayout(stage, cropSize) {
 }
 
 function updateTargetBoxOverlay() {
+  // 检测框已由 core 端 OpenCV 画进预览帧（preview_draw_detections），
+  // 前端不再叠加 HTML 并集框（避免重复大框）。保留 DOM 防报错，隐藏即可。
   const box = $("targetBoxOverlay");
-  if (!box) return;
-  const label = $("targetBoxLabel");
-  const stage = box.closest(".preview-stage");
-  const detection = state.data?.state?.detection || {};
-  const target = detection.target_box;
-  const allBoxes = Array.isArray(detection.boxes) ? detection.boxes : [];
-  const displayTarget = (() => {
-    if (!target) return null;
-    const related = allBoxes.filter((candidate) => {
-      const cx = (Number(candidate.x1) + Number(candidate.x2)) * 0.5;
-      const cy = (Number(candidate.y1) + Number(candidate.y2)) * 0.5;
-      const tw = Math.max(1, Number(target.x2) - Number(target.x1));
-      const th = Math.max(1, Number(target.y2) - Number(target.y1));
-      const verticalOverlap = Number(candidate.y2) >= Number(target.y1) && Number(candidate.y1) <= Number(target.y2);
-      return verticalOverlap && Math.abs(cx - ((Number(target.x1) + Number(target.x2)) * 0.5)) <= Math.max(tw * 2.5, 180) &&
-        Math.abs(cy - ((Number(target.y1) + Number(target.y2)) * 0.5)) <= th;
-    });
-    const boxes = related.length ? related : [target];
-    return boxes.reduce((merged, candidate) => ({
-      x1: Math.min(merged.x1, Number(candidate.x1)),
-      y1: Math.min(merged.y1, Number(candidate.y1)),
-      x2: Math.max(merged.x2, Number(candidate.x2)),
-      y2: Math.max(merged.y2, Number(candidate.y2)),
-    }), { x1: Number(target.x1), y1: Number(target.y1), x2: Number(target.x2), y2: Number(target.y2) });
-  })();
-  const cropSize = getCropSize(state.config?.capture?.crop_size || 320);
-  const inputWidth = Number(state.data?.state?.capture?.input_width || cropSize);
-  const inputHeight = Number(state.data?.state?.capture?.input_height || cropSize);
-  const configuredCrop = Number(state.config?.capture?.crop_size || 0);
-  const hasCaptureRoi = configuredCrop > 0 && configuredCrop <= inputWidth && configuredCrop <= inputHeight;
-  const sourceWidth = hasCaptureRoi ? configuredCrop : inputWidth;
-  const sourceHeight = hasCaptureRoi ? configuredCrop : inputHeight;
-  const cropOffsetX = Number(state.config?.capture?.crop_offset_x || 0);
-  const cropOffsetY = Number(state.config?.capture?.crop_offset_y || 0);
-  const sourceOriginX = hasCaptureRoi
-    ? Math.max(0, (inputWidth - sourceWidth) * 0.5 + cropOffsetX)
-    : 0;
-  const sourceOriginY = hasCaptureRoi
-    ? Math.max(0, (inputHeight - sourceHeight) * 0.5 + cropOffsetY)
-    : 0;
-  const layout = getPreviewImageLayout(stage, cropSize);
-  if (!displayTarget || !layout || !(sourceWidth > 0 && sourceHeight > 0)) {
-    box.style.display = "none";
-    return;
-  }
-  const sourceXScale = layout.imageWidth / sourceWidth;
-  const sourceYScale = layout.imageHeight / sourceHeight;
-  const x1 = clamp(Number(displayTarget.x1) - sourceOriginX, 0, sourceWidth);
-  const y1 = clamp(Number(displayTarget.y1) - sourceOriginY, 0, sourceHeight);
-  const x2 = clamp(Number(displayTarget.x2) - sourceOriginX, 0, sourceWidth);
-  const y2 = clamp(Number(displayTarget.y2) - sourceOriginY, 0, sourceHeight);
-  if (!(x2 > x1 && y2 > y1)) {
-    box.style.display = "none";
-    return;
-  }
-  box.style.display = "block";
-  box.style.left = `${layout.imageLeft + x1 * sourceXScale}px`;
-  box.style.top = `${layout.imageTop + y1 * sourceYScale}px`;
-  box.style.width = `${(x2 - x1) * sourceXScale}px`;
-  box.style.height = `${(y2 - y1) * sourceYScale}px`;
-  if (label) {
-    label.textContent = `目标 ${target.target_id ?? "-"} · 类别 ${target.class_id ?? "-"}`;
-  }
+  if (box) box.style.display = "none";
+  return;
 }
 
 function updateAimRangeOverlay() {
