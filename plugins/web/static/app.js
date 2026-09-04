@@ -5978,22 +5978,27 @@ function renderRuntime(payload) {
   const preview = $("previewImage");
   if (preview) {
     const src = runtime.preview_path || "/api/preview.mjpg";
-    preview.style.visibility = "visible";
-    // 服务从停止→运行（或 running 状态翻转）时，MJPEG 流连接可能已断开（黑屏）。
-    // 强制重设 src 触发浏览器重新建立 multipart 流连接。
     const wasRunning = preview.dataset.running === "1";
     const nowRunning = !!runtime.running;
-    if (preview.dataset.src !== src || (wasRunning !== nowRunning && nowRunning)) {
+    // 状态翻转检测（双向）：运行→停止 或 停止→运行 都强制重建 MJPEG 连接。
+    // 原实现只在"停止→运行"时重连，且 dataset.running 未在"运行→停止"时更新，
+    // 导致服务重启后前端永远检测不到翻转 → 画框冻结不恢复。
+    const stateChanged = wasRunning !== nowRunning;
+    if (preview.dataset.src !== src || stateChanged) {
       preview.dataset.src = src;
       preview.dataset.running = nowRunning ? "1" : "0";
       const oldSrc = preview.src;
       preview.src = "";
-      // 下一帧刷新时重设 src，确保浏览器重新发起 MJPEG 请求
-      requestAnimationFrame(() => {
-        if (preview.dataset.src === src) preview.src = src;
-        else preview.src = oldSrc;
-      });
+      // 停止时清空画面（不显示陈旧画框）；运行下一帧重设 src 重新建流
+      if (nowRunning) {
+        requestAnimationFrame(() => {
+          if (preview.dataset.src === src) preview.src = src;
+          else preview.src = oldSrc;
+        });
+      }
     }
+    // 停止态隐藏画面，运行态显示
+    preview.style.visibility = nowRunning ? "visible" : "hidden";
   }
   updateAimRangeOverlay();
   updateTargetBoxOverlay();

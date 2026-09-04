@@ -49,12 +49,11 @@ class PreviewService:
     def snapshot(self):
         frame=self.source.latest()
         if frame is None:
-            # core 停止/无帧：连续计数，清空缓存断流，防浏览器显示陈旧画框
+            # core 停止/无帧：立即清空缓存断流，防浏览器显示陈旧画框
             self._no_frame_count += 1
-            if self._no_frame_count >= 2:
-                with self._lock:
-                    self._last=None
-                    self._last_pub_seq=-1
+            with self._lock:
+                self._last=None
+                self._last_pub_seq=-1
             return None
         self._no_frame_count = 0
         with self._lock:
