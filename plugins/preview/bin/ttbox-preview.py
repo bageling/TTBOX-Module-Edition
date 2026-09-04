@@ -65,10 +65,29 @@ class PreviewHandler(BaseHTTPRequestHandler):
         if self.path == "/api/preview/status":
             body=json.dumps(self.service.status(),ensure_ascii=False).encode(); self.send_response(200); self.send_header("Content-Type","application/json"); self.send_header("Content-Length",str(len(body))); self.end_headers(); self.wfile.write(body); return
         if self.path == "/api/preview.mjpg":
-            frame=self.service.snapshot()
-            if not frame: self.send_error(404,"暂无预览帧"); return
-            body=b"--ttboxframe\r\nContent-Type: image/jpeg\r\nContent-Length: "+str(len(frame.data)).encode()+b"\r\n\r\n"+frame.data+b"\r\n"
-            self.send_response(200); self.send_header("Content-Type","multipart/x-mixed-replace; boundary=ttboxframe"); self.send_header("Content-Length",str(len(body))); self.end_headers(); self.wfile.write(body); return
+            # MJPEG 流：持续推送新帧（不设 Content-Length，保持连接不断开）。
+            self.send_response(200)
+            self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=ttboxframe")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "keep-alive")
+            self.end_headers()
+            last_seq = -1
+            try:
+                while True:
+                    frame = self.service.snapshot()
+                    if frame and frame.frame_number != last_seq:
+                        last_seq = frame.frame_number
+                        self.wfile.write(b"--ttboxframe\r\n")
+                        self.wfile.write(b"Content-Type: image/jpeg\r\n")
+                        self.wfile.write(b"Content-Length: " + str(len(frame.data)).encode() + b"\r\n\r\n")
+                        self.wfile.write(frame.data)
+                        self.wfile.write(b"\r\n")
+                        self.wfile.flush()
+                    else:
+                        time.sleep(0.05)
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                pass
+            return
         self.send_error(404)
 
 def create_server(host="127.0.0.1", port=8082, service=None):
