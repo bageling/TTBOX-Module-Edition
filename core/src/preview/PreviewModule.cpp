@@ -113,12 +113,21 @@ void PreviewModule::draw_boxes(uint8_t* buf, uint32_t w, uint32_t h, uint32_t st
         const cv::Scalar color = (b.class_id == 1) ? cv::Scalar(0, 200, 0)
                                : (b.class_id == 0) ? cv::Scalar(0, 0, 255)
                                : cv::Scalar(0, 200, 200);
-        const int thickness = (b.class_id == 1) ? 2 : 1;
+        // 线宽：身体框 3px，头部/小框 2px（细框更稳、不闪）
+        const int thickness = (b.class_id == 1) ? 3 : 2;
         cv::rectangle(img, cv::Point(X1, Y1), cv::Point(X2, Y2), color, thickness);
+        // 标签：黑色底衬 + 彩色文字（可读、稳定）
         char label[64];
         std::snprintf(label, sizeof(label), "%d %.2f", b.class_id, b.score);
-        cv::putText(img, label, cv::Point(X1, std::max(10, Y1 - 4)),
-                    cv::FONT_HERSHEY_SIMPLEX, 0.4, color, 1, cv::LINE_AA);
+        int baseline = 0;
+        const cv::Size ts = cv::getTextSize(label, cv::FONT_HERSHEY_SIMPLEX, 0.45, 1, &baseline);
+        const int lx = X1;
+        const int ly = std::max(ts.height + 4, Y1 - ts.height - 2);
+        cv::rectangle(img, cv::Point(lx, ly - ts.height - 2),
+                      cv::Point(lx + ts.width + 4, ly + baseline),
+                      cv::Scalar(0, 0, 0), cv::FILLED);
+        cv::putText(img, label, cv::Point(lx + 2, ly - 2),
+                    cv::FONT_HERSHEY_SIMPLEX, 0.45, color, 1, cv::LINE_AA);
     }
 }
 
@@ -130,43 +139,55 @@ void PreviewModule::draw_detections_cpu(uint8_t* roi, uint32_t roi_w, uint32_t r
                static_cast<float>(applied_roi_x_), static_cast<float>(applied_roi_y_));
 }
 
-// 检测框平滑：EMA 融合连续帧，消除抖动闪烁；丢帧超阈值则清空
+// 检测框平滑：EMA 融合连续帧 + 短暂丢失保持，消除抖动闪烁
 void PreviewModule::smooth_boxes(const std::vector<DetectionBox>& raw,
                                  std::vector<DetectionBox>* out) {
     if (!out) return;
     if (raw.empty()) {
         ++smooth_lost_count_;
-        if (smooth_lost_count_ > 5) {  // 连续 5 帧无目标 → 清空旧框，防残影
-            smooth_prev_.clear();
+        // 短暂丢失（<3 帧）保留旧框防闪烁；超阈值清空防残影
+        if (smooth_lost_count_ <= 3) {
+            *out = smooth_prev_;
+            return;
         }
-        *out = smooth_prev_;  // 短暂丢帧时保留上一帧，防闪烁
+        smooth_prev_.clear();
+        out->clear();
         return;
     }
     smooth_lost_count_ = 0;
     const float alpha = 0.35f;  // 新帧权重（低=更平滑，高=更跟手）
+    const float max_match_px = 120.0f;  // 匹配距离上限：多目标时避免误连
+    const float max_match_d = max_match_px * max_match_px;
     std::vector<DetectionBox> result;
     result.reserve(raw.size());
+    // 一对一匹配：每个上一帧框最多被一个当前框使用，防止多目标互相拉扯合并
+    std::vector<bool> prev_used(smooth_prev_.size(), false);
     for (const auto& b : raw) {
         DetectionBox blended = b;
         // 按类别+中心最近匹配上一帧，只平滑坐标
         const float cx = (b.x1 + b.x2) * 0.5f, cy = (b.y1 + b.y2) * 0.5f;
-        const DetectionBox* best = nullptr;
-        float best_d = 1e18f;
-        for (const auto& p : smooth_prev_) {
+        int best_idx = -1;
+        float best_d = max_match_d;
+        for (size_t i = 0; i < smooth_prev_.size(); ++i) {
+            if (prev_used[i]) continue;
+            const auto& p = smooth_prev_[i];
             if (p.class_id != b.class_id) continue;
             const float pcx = (p.x1 + p.x2) * 0.5f, pcy = (p.y1 + p.y2) * 0.5f;
             const float d = (pcx - cx) * (pcx - cx) + (pcy - cy) * (pcy - cy);
-            if (d < best_d) { best_d = d; best = &p; }
+            if (d < best_d) { best_d = d; best_idx = static_cast<int>(i); }
         }
-        if (best && best_d < 40000.0f) {  // <200px 视为同一目标
-            blended.x1 = best->x1 * (1 - alpha) + b.x1 * alpha;
-            blended.y1 = best->y1 * (1 - alpha) + b.y1 * alpha;
-            blended.x2 = best->x2 * (1 - alpha) + b.x2 * alpha;
-            blended.y2 = best->y2 * (1 - alpha) + b.y2 * alpha;
-            blended.score = best->score * (1 - alpha) + b.score * alpha;
+        if (best_idx >= 0) {
+            const auto& best = smooth_prev_[best_idx];
+            prev_used[best_idx] = true;
+            blended.x1 = best.x1 * (1 - alpha) + b.x1 * alpha;
+            blended.y1 = best.y1 * (1 - alpha) + b.y1 * alpha;
+            blended.x2 = best.x2 * (1 - alpha) + b.x2 * alpha;
+            blended.y2 = best.y2 * (1 - alpha) + b.y2 * alpha;
+            blended.score = best.score * (1 - alpha) + b.score * alpha;
         }
         result.push_back(blended);
     }
+    // 未匹配的旧框丢弃（目标已消失/多目标分离），防止残影连框
     smooth_prev_ = result;
     *out = std::move(result);
 }

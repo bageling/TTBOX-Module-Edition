@@ -99,6 +99,7 @@ private:
     // 检测框平滑状态（预览线程独享，无锁）
     std::vector<DetectionBox> smooth_prev_;
     uint64_t smooth_lost_count_ = 0;
+    uint64_t smooth_hold_count_ = 0;  // 单目标短暂丢失保持帧数（防头部小框闪烁）
 
     // RGA 硬件缩放（替代 CPU 双线性：消除 Preview 对 AI 的 CPU 抢占）
     std::unique_ptr<RgaProcessor> rga_;
