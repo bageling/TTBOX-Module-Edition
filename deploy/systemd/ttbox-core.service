@@ -1,0 +1,15 @@
+[Unit]
+Description=TTBOX Core (C++)
+After=systemd-modules-load.service
+Wants=systemd-modules-load.service
+
+[Service]
+Type=simple
+ExecStart=/opt/ttbox/bin/ttbox_core_main --config /opt/ttbox/config/default.json --ipc /tmp/ttbox_core.sock
+WorkingDirectory=/opt/ttbox
+Restart=always
+RestartSec=2
+Environment=LD_LIBRARY_PATH=/usr/local/lib
+
+[Install]
+WantedBy=multi-user.target

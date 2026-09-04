@@ -100,7 +100,7 @@ if(UNIX AND NOT APPLE)
     src/preview/PreviewModule.cpp
   )
   # RGA（librga，阶段 A-3）：板端已装 /usr/local；缺失则不编译 RGA 源
-  find_path(RGA_INCLUDE_DIR im2d.h PATHS /usr/local/include)
+  find_path(RGA_INCLUDE_DIR im2d.h PATHS /usr/local/include /usr/include /usr/include/rga)
   find_library(RGA_LIBRARY rga PATHS /usr/local/lib)
   if(RGA_INCLUDE_DIR AND RGA_LIBRARY)
     list(APPEND CORE_SOURCES src/rga/RgaProcessor.cpp)

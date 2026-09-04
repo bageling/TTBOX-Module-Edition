@@ -13,6 +13,7 @@ core/cmake-build*/
 *.o
 *.a
 *.so
+!lib/librknnrt.so
 *.d
 *.exe
 *.lib
@@ -44,11 +45,12 @@ core/core.*
 *.yuv
 # PID Trace 采集 CSV（运行时产物，不入库）
 pid_trace*.csv
-# 大模型文件（.pt / .onnx / 大 .rknn）
+# 大模型文件（.pt / .onnx / 大 .rknn；随附的已训练模型白名单入库）
 *.pt
 *.pth
 *.onnx
 *.rknn
+!models/installed/jwdl_sjzv11/model.rknn
 # 测试截图/预览/中间产物（不入库）
 *.bgr
 *.bmp

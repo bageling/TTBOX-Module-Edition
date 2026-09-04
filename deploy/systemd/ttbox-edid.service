@@ -1,0 +1,11 @@
+[Unit]
+Description=TTBOX EDID Inject (oneshot)
+After=systemd-modules-load.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/ttbox/edid/inject_edid.sh 2
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

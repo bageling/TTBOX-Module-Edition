@@ -1,0 +1,17 @@
+[Unit]
+Description=TTBOX Preview Plugin
+After=ttbox-core.service
+Requires=ttbox-core.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/ttbox/plugins/preview
+ExecStart=/opt/ttbox/plugins/preview/bin/ttbox-preview
+Environment=TTBOX_IPC_SOCKET=/tmp/ttbox_core.sock
+Environment=TTBOX_PREVIEW_HOST=127.0.0.1
+Environment=TTBOX_PREVIEW_PORT=8082
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
