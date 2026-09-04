@@ -223,6 +223,23 @@ bool PreviewModule::start(const LatestFrame* frame_source, const Params& params,
         rga_.reset();
         return false;
     }
+    // OpenCV 预热：首次 putText/rectangle 会懒加载字体与类型注册表（几 ms），
+    // 提前在启动阶段触发，避免第一份 Detection 到达时画框首帧卡顿。
+    if (params.draw_detections) {
+        const auto ocv_t0 = std::chrono::steady_clock::now();
+        try {
+            cv::Mat warm(16, 16, CV_8UC3, cv::Scalar(0, 0, 0));
+            cv::putText(warm, "T", cv::Point(2, 10), cv::FONT_HERSHEY_SIMPLEX,
+                        0.4, cv::Scalar(0, 200, 0), 1, cv::LINE_AA);
+            cv::rectangle(warm, cv::Point(0, 0), cv::Point(15, 15),
+                          cv::Scalar(0, 200, 200), 1);
+        } catch (const std::exception&) {
+            // 预热失败不阻塞预览：画框仍会在后续帧尝试
+        }
+        const double ocv_ms = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - ocv_t0).count();
+        TTBOX_LOG_INFO("OpenCV Overlay 预热完成: " + std::to_string(ocv_ms) + "ms");
+    }
     thread_ = std::thread(&PreviewModule::loop, this);
     return true;
 }
