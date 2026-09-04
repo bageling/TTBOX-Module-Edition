@@ -309,7 +309,7 @@
 
   function samplePayload() {
     return {
-      schema: "aiassistance.motion-sample.v1",
+      schema: "ttbox.motion-sample.v1",
       mode: selectedMode(),
       completion: selectedCompletion(),
       canvas: { width: state.width, height: state.height },

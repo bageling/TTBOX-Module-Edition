@@ -1,5 +1,5 @@
 // MakcuMouseBackend.hpp — MAKCU 官方代理输出后端
-// 协议来源：板端 /opt/usb-proxy/bin/usb-proxy-mouse-client
+// 协议来源：板端鼠标控制服务（自研）
 #pragma once
 
 #include "output/OutputBackend.hpp"
@@ -9,7 +9,7 @@ namespace ttbox::core::output {
 
 class MakcuMouseBackend final : public IOutputBackend {
 public:
-    explicit MakcuMouseBackend(std::string socket_path = "/run/aiassistance-makcu/cmd.sock")
+    explicit MakcuMouseBackend(std::string socket_path = "/run/ttbox-makcu/cmd.sock")
         : socket_path_(std::move(socket_path)) {}
     ~MakcuMouseBackend() override { disconnect(); }
 

@@ -113,7 +113,6 @@ Detection → TargetSelector → PID → AimThread
 TTBOX-Module-Edition/
 ├── core/          C++ 核心（AI 高速链路，真实源码）
 ├── usbproxy/      ★ TTBOX usb-proxy（自研，raw-gadget+libusb）
-├── third_party/   第三方依赖源码（Apache-2.0，raw-gadget 生态）
 ├── framework/     Python 框架（插件管理/配置/服务/安全）
 ├── plugins/       功能插件（web/preview/model/fan/wifi/...）
 ├── platform/      平台层（systemd/运行时/模型/健康）

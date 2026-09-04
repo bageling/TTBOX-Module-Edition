@@ -36,7 +36,7 @@ def test_validate_motion_sample_accepts_ttbox_sample():
 
 def test_validate_motion_sample_rejects_external_schema():
     payload = sample()
-    payload["schema"] = "aiassistance.motion-sample.v1"
+    payload["schema"] = "ttbox.motion-sample.v1"
     with pytest.raises(MotionSampleError, match="schema"):
         validate_motion_sample(payload)
 

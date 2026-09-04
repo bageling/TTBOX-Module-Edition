@@ -93,7 +93,7 @@ def _connection_up(name: str, iface: str, timeout: int = 35, password: str = "")
     args = ["--wait", str(max(1, timeout - 5)), "connection", "up", name, "ifname", iface]
     password_file = ""
     if password:
-        fd, password_file = tempfile.mkstemp(prefix="aiassistance-nmcli-", text=True)
+        fd, password_file = tempfile.mkstemp(prefix="ttbox-nmcli-", text=True)
         try:
             os.fchmod(fd, 0o600)
             with os.fdopen(fd, "w", encoding="utf-8") as handle:

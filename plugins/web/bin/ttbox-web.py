@@ -1959,7 +1959,7 @@ def get_display_hardware():
     advertised = []
     try:
         out = subprocess.check_output(
-            ['/opt/aiassistance/bin/hdmirx_edid', '--list'],
+            ['/usr/bin/hdmirx_edid', '--list'],
             text=True, timeout=5)
         in_modes = False
         for lm in out.splitlines():
@@ -1990,7 +1990,7 @@ def get_display_hardware():
     available_modes = []
     try:
         out2 = subprocess.check_output(
-            ['/opt/aiassistance/bin/hdmirx_edid', '--list'],
+            ['/usr/bin/hdmirx_edid', '--list'],
             text=True, timeout=5)
         in_modes = False
         for lm in out2.splitlines():
@@ -2028,7 +2028,7 @@ def get_display_hardware():
     status_text = ''
     try:
         out = subprocess.check_output(
-            ['/opt/aiassistance/bin/hdmirx_edid', '--status'],
+            ['/usr/bin/hdmirx_edid', '--status'],
             text=True, timeout=5)
         status_text = out
         nm = re.search(r'name=(\S+)', out)

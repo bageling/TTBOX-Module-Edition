@@ -1,7 +1,7 @@
 // TargetSelector.hpp — A10 目标选择器（多目标追踪 + 分层选择）
 //
 // 全部在 ROI/crop 坐标系内选择目标（不恢复到全帧）。
-// 对齐参考系统（aiassistance）目标选择层级：
+// 目标选择层级：
 //   track_lock → rect_lock/continuity → score
 //   （1）selector_track_lock：候选存在与上一帧相同 track_id 的目标
 //   （2）selector_rect_lock：track id 变但候选矩形与锁定目标位置匹配（同一目标被重编号）

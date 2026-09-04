@@ -480,7 +480,7 @@ void Application::run() {
         }
     }
 
-    // ---- 自动启动 AI 流水线（参考 yu auto-start 语义）----
+    // ---- 自动启动 AI 流水线 ----
     // 语义：want_runtime_running_=true 时，尽力保持 runtime 运行。
     //   1) 首次启动：先立即尝试一次；失败则进入后台重试（HDMI 未锁定 / V4L2 CMA 碎片
     //      是板端常见瞬时故障，几秒后即可恢复）。
