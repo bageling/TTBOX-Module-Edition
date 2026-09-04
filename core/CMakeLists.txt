@@ -168,6 +168,15 @@ if(UNIX AND NOT APPLE)
     message(WARNING "libjpeg 未找到，PreviewModule 不编译")
     list(REMOVE_ITEM CORE_SOURCES src/preview/PreviewModule.cpp)
   endif()
+  # OpenCV（预览检测框绘制：身体框+头部小框）
+  find_package(OpenCV QUIET COMPONENTS core imgproc)
+  if(OpenCV_FOUND)
+    target_link_libraries(ttbox_core PUBLIC ${OpenCV_LIBS})
+    target_include_directories(ttbox_core PUBLIC ${OpenCV_INCLUDE_DIRS})
+    message(STATUS "OpenCV found: ${OpenCV_VERSION} (${OpenCV_LIBS})")
+  else()
+    message(WARNING "OpenCV 未找到，预览检测框绘制不编译（PreviewModule 无画框仍可工作）")
+  endif()
 endif()
 
 # ---- 新架构硬件入口（默认 NullHidOutput，不接管真实鼠标）----

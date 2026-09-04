@@ -8,6 +8,7 @@ namespace ttbox::core {
 #else
 
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <fcntl.h>
 #include <sys/mman.h>
@@ -15,6 +16,9 @@ namespace ttbox::core {
 
 #include <jpeglib.h>
 #include <csetjmp>
+
+#include <opencv2/core.hpp>
+#include <opencv2/imgproc.hpp>
 
 #include "common/Logger.hpp"
 
@@ -85,6 +89,87 @@ bool bgr3_to_jpeg(const uint8_t* bgr, uint32_t w, uint32_t h, uint32_t stride,
 }
 
 }  // namespace
+
+// 检测框绘制统一入口：原图系 (src_w x src_h, 原点 ox,oy) → 预览系 (w x h)。
+// 与 DecodeNMS 坐标映射一致：preview = (orig - origin) * (out / src)。
+void PreviewModule::draw_boxes(uint8_t* buf, uint32_t w, uint32_t h, uint32_t stride,
+                               const std::vector<DetectionBox>& boxes,
+                               float src_w, float src_h, float ox, float oy) const {
+    if (!buf || boxes.empty() || w == 0 || h == 0) return;
+    const float sx = src_w > 0.0f ? static_cast<float>(w) / src_w : 1.0f;
+    const float sy = src_h > 0.0f ? static_cast<float>(h) / src_h : 1.0f;
+    cv::Mat img(h, w, CV_8UC3, buf, stride);
+    for (const auto& b : boxes) {
+        const float px1 = (b.x1 - ox) * sx;
+        const float py1 = (b.y1 - oy) * sy;
+        const float px2 = (b.x2 - ox) * sx;
+        const float py2 = (b.y2 - oy) * sy;
+        const int X1 = static_cast<int>(std::max(0.0f, std::min(px1, static_cast<float>(w - 1))));
+        const int Y1 = static_cast<int>(std::max(0.0f, std::min(py1, static_cast<float>(h - 1))));
+        const int X2 = static_cast<int>(std::max(0.0f, std::min(px2, static_cast<float>(w - 1))));
+        const int Y2 = static_cast<int>(std::max(0.0f, std::min(py2, static_cast<float>(h - 1))));
+        if (X2 <= X1 || Y2 <= Y1) continue;
+        // 颜色：身体类(1)=绿，头部类(0)=红，其他=黄
+        const cv::Scalar color = (b.class_id == 1) ? cv::Scalar(0, 200, 0)
+                               : (b.class_id == 0) ? cv::Scalar(0, 0, 255)
+                               : cv::Scalar(0, 200, 200);
+        const int thickness = (b.class_id == 1) ? 2 : 1;
+        cv::rectangle(img, cv::Point(X1, Y1), cv::Point(X2, Y2), color, thickness);
+        char label[64];
+        std::snprintf(label, sizeof(label), "%d %.2f", b.class_id, b.score);
+        cv::putText(img, label, cv::Point(X1, std::max(10, Y1 - 4)),
+                    cv::FONT_HERSHEY_SIMPLEX, 0.4, color, 1, cv::LINE_AA);
+    }
+}
+
+// CPU 直拷路径：预览输出 = ROI 1:1，检测框原图系减 ROI 原点
+void PreviewModule::draw_detections_cpu(uint8_t* roi, uint32_t roi_w, uint32_t roi_h,
+                                        uint32_t roi_stride, const std::vector<DetectionBox>& boxes) const {
+    draw_boxes(roi, roi_w, roi_h, roi_stride, boxes,
+               static_cast<float>(applied_roi_w_), static_cast<float>(applied_roi_h_),
+               static_cast<float>(applied_roi_x_), static_cast<float>(applied_roi_y_));
+}
+
+// 检测框平滑：EMA 融合连续帧，消除抖动闪烁；丢帧超阈值则清空
+void PreviewModule::smooth_boxes(const std::vector<DetectionBox>& raw,
+                                 std::vector<DetectionBox>* out) {
+    if (!out) return;
+    if (raw.empty()) {
+        ++smooth_lost_count_;
+        if (smooth_lost_count_ > 5) {  // 连续 5 帧无目标 → 清空旧框，防残影
+            smooth_prev_.clear();
+        }
+        *out = smooth_prev_;  // 短暂丢帧时保留上一帧，防闪烁
+        return;
+    }
+    smooth_lost_count_ = 0;
+    const float alpha = 0.35f;  // 新帧权重（低=更平滑，高=更跟手）
+    std::vector<DetectionBox> result;
+    result.reserve(raw.size());
+    for (const auto& b : raw) {
+        DetectionBox blended = b;
+        // 按类别+中心最近匹配上一帧，只平滑坐标
+        const float cx = (b.x1 + b.x2) * 0.5f, cy = (b.y1 + b.y2) * 0.5f;
+        const DetectionBox* best = nullptr;
+        float best_d = 1e18f;
+        for (const auto& p : smooth_prev_) {
+            if (p.class_id != b.class_id) continue;
+            const float pcx = (p.x1 + p.x2) * 0.5f, pcy = (p.y1 + p.y2) * 0.5f;
+            const float d = (pcx - cx) * (pcx - cx) + (pcy - cy) * (pcy - cy);
+            if (d < best_d) { best_d = d; best = &p; }
+        }
+        if (best && best_d < 40000.0f) {  // <200px 视为同一目标
+            blended.x1 = best->x1 * (1 - alpha) + b.x1 * alpha;
+            blended.y1 = best->y1 * (1 - alpha) + b.y1 * alpha;
+            blended.x2 = best->x2 * (1 - alpha) + b.x2 * alpha;
+            blended.y2 = best->y2 * (1 - alpha) + b.y2 * alpha;
+            blended.score = best->score * (1 - alpha) + b.score * alpha;
+        }
+        result.push_back(blended);
+    }
+    smooth_prev_ = result;
+    *out = std::move(result);
+}
 
 bool PreviewModule::start(const LatestFrame* frame_source, const Params& params, std::string* error) {
     if (!frame_source) {
@@ -246,6 +331,17 @@ bool PreviewModule::encode_frame(const FrameBuffer& frame, std::vector<uint8_t>*
                                + static_cast<size_t>(applied_roi_x_) * 3;
             roi.insert(roi.end(), src, src + row_bytes);
         }
+        // 检测框绘制（开启时）：原图系 → ROI 预览系；EMA 平滑防闪烁
+        if (params_.draw_detections) {
+            std::vector<DetectionBox> raw, boxes;
+            {
+                std::lock_guard<std::mutex> lk(provider_mutex_);
+                if (detections_provider_) raw = detections_provider_();
+            }
+            smooth_boxes(raw, &boxes);
+            draw_detections_cpu(roi.data(), applied_roi_w_, applied_roi_h_,
+                                static_cast<uint32_t>(row_bytes), boxes);
+        }
         return bgr3_to_jpeg(roi.data(), applied_roi_w_, applied_roi_h_,
                             row_bytes, params_.jpeg_quality, jpeg_out, error);
     }
@@ -261,6 +357,23 @@ bool PreviewModule::encode_frame(const FrameBuffer& frame, std::vector<uint8_t>*
     if (!rga_->process(frame, &rga_out, &rerr)) {
         if (error) *error = "预览 RGA 缩放失败: " + rerr;
         return false;
+    }
+
+    // 检测框绘制（开启时）：RGA 输出 = ROI 区域（1:1 或缩放），原图系 → 预览系
+    if (params_.draw_detections) {
+        std::vector<DetectionBox> raw, boxes;
+        {
+            std::lock_guard<std::mutex> lk(provider_mutex_);
+            if (detections_provider_) raw = detections_provider_();
+        }
+        smooth_boxes(raw, &boxes);
+        if (!boxes.empty()) {
+            draw_boxes(static_cast<uint8_t*>(rga_out.vir_addr), rga_out.width, rga_out.height,
+                       rga_out.stride, boxes,
+                       static_cast<float>(applied_roi_w_ > 0 ? applied_roi_w_ : frame.info.width),
+                       static_cast<float>(applied_roi_h_ > 0 ? applied_roi_h_ : frame.info.height),
+                       static_cast<float>(applied_roi_x_), static_cast<float>(applied_roi_y_));
+        }
     }
 
     // RGA 输出虚拟地址（mmap 常驻）直接喂 JPEG 编码器

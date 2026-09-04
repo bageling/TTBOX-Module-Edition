@@ -115,8 +115,14 @@ bool CoreRuntime::start(std::string* error) {
             TTBOX_LOG_WARN("Preview 启动失败（不影响流水线）: " + perr);
             preview_.reset();
         } else {
+            // 检测框绘制数据源：AimThread 最新检测（原图系），预览编码时画框
+            if (pp.draw_detections) {
+                preview_->set_detections_provider(
+                    [this]() { return aim_thread_.status().detection_boxes; });
+            }
             TTBOX_LOG_INFO("Preview 已启动: " + std::to_string(pp.out_width) + "x" +
-                           std::to_string(pp.out_height) + " @" + std::to_string(pp.fps) + "fps");
+                           std::to_string(pp.out_height) + " @" + std::to_string(pp.fps) + "fps" +
+                           (pp.draw_detections ? " +draw_detections" : ""));
         }
     }
     return true;
