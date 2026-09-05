@@ -1,7 +1,7 @@
 [Unit]
 Description=TTBOX Preview Plugin
 After=ttbox-core.service
-Requires=ttbox-core.service
+Wants=ttbox-core.service
 
 [Service]
 Type=simple
