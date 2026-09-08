@@ -13,7 +13,7 @@
 |------|------|------|
 | 01 自动标定 | 一键测鼠标响应（px/count + 延迟），写入 kp | REAL（手动/状态）；自动闭环 VERIFY（需真实游戏目标） |
 | 02 PID | 移动倍率 + KP/KI/KD/Predict/Rate/死区（X/Y 独立） | REAL |
-| 03 拉枪曲线 | 开关 + 强度 + 随机抖动 + 启用距离 | 配置链路 REAL；输出消费 PLANNED（29d3622 重构断线，PullCurve.hpp 类完整待接线） |
+| 03 拉枪曲线 | 开关 + 强度 + 随机抖动 + 启用距离 | REAL（2026-09-08 接入 AimThread 输出链） |
 | 04 持续提前量 | 开关 + 进入距离 + 系数 + 渐入渐出 + 近距禁用 | 配置链路 REAL；C 桥实现 VERIFY（运行链未启用） |
 | 05 屏蔽物理移动 | 瞄准时屏蔽 X/Y 物理轴 | 配置链路 REAL；C 桥实现 VERIFY（运行链未启用） |
 
@@ -48,7 +48,7 @@
 
 ## 已知边界（诚实标注）
 
-- 拉枪曲线输出消费：PullCurve.hpp 类完整但 AimThread 未接线（29d3622 重构遗留），Phase 8.3 未新增算法、保留 PLANNED。
+- 拉枪曲线输出消费：✅ 已接入（2026-09-08）。PullCurve.hpp 类在 AimThread.cpp 输出链 deadzone 前调用（personal_gain 之后），目标切换时 reset；算法单测 test_mouse.cpp:465 + 链路注入测试 test_pull_curve_aimthread.cpp（4 场景：远距启用/近距关闭/disabled/热键门优先）。
 - 持续提前量/屏蔽物理移动/开火锁Y：实现都在 C 桥（ttbox-hid-bridge.c），当前板端运行链未启用 C 桥（无进程、无 features.conf），配置链路 REAL、运行效果 VERIFY。
 - 自动标定自动闭环：需要真实游戏画面 + 静止目标才能跑完整 10 轮；当前真机无目标时 start 被真实拒绝（业务正确）。
 - 个性曲线训练：Core 无能力，UI 保留 PLANNED，不造假 API。
@@ -69,6 +69,6 @@
 
 ## 后续计划
 
-1. 拉枪曲线接入 AimThread 输出链（复用 PullCurve.hpp，无新算法）。
+1. ~~拉枪曲线接入 AimThread 输出链~~（✅ 2026-09-08 完成）
 2. C 桥运行链启用后验证 fire_lock/block_physical/continuous_lead 实机效果。
 3. 自动标定完整闭环需真实游戏场景验收。

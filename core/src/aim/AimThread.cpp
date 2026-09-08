@@ -41,6 +41,7 @@ void AimThread::loop() {
             float out_sensitivity = 1.0f, out_scale = 1.0f;
             float out_deadzone = 1.0f;
             PersonalMotionConfig personal_motion;
+            PullCurveConfig pull_curve_cfg;  // 拉枪曲线配置（默认 enabled=true, min_distance=80, strength=0.8）
             float kp_x = 0.0f, kp_y = 0.0f, kd_x = 0.0f, kd_y = 0.0f;
             AimPointProfile aim_point;
             if (runtime_config_) {
@@ -60,6 +61,7 @@ void AimThread::loop() {
                     out_scale = profile->mouse.output_scale;
                     out_deadzone = profile->mouse.output_deadzone;
                     personal_motion = profile->mouse.personal_motion;
+                    pull_curve_cfg = profile->mouse.pull_curve;
                     pid_x_.configure(kp_x, kd_x, profile->mouse.predict_x,
                                      profile->mouse.rate_x, profile->mouse.smooth_x);
                     pid_y_.configure(kp_y, kd_y, profile->mouse.predict_y,
@@ -128,6 +130,7 @@ void AimThread::loop() {
                 if (last_target_id_ != -1 && selected.target_id != last_target_id_) {
                     // 目标切换：速度/加速度来自旧目标，必须清除预测状态。
                     pid_x_.reset(); pid_y_.reset(); controller_.reset(); remainder_x_ = remainder_y_ = 0.0f;
+                    pull_curve_.reset();  // 拉枪曲线时间基准清零（新目标重新拉枪）
                 }
                 last_target_id_ = selected.target_id;
                 // AIBOX 对标：不做位置外推；误差直接来自本帧检测结果。
@@ -161,7 +164,7 @@ void AimThread::loop() {
                 }
                 const float dt = previous_timestamp_us > 0 && task.timestamp_us > previous_timestamp_us
                     ? static_cast<float>(task.timestamp_us - previous_timestamp_us) / 1000000.0f : 0.004f;
-                (void)dt;
+                const float dt_ms = dt * 1000.0f;  // 拉枪曲线抖动需要毫秒级时间基准
                 // pid1.cpp P_PID 直接消费控制域误差（FOV 开启时已是 HID count 域）。
                 trace_smith_dx = 0.0f; trace_smith_dy = 0.0f;
                 trace_control_x = control_x; trace_control_y = control_y;
@@ -178,6 +181,11 @@ void AimThread::loop() {
                 const float personal_gain = PersonalMotion{}.scale(personal_distance, personal_motion);
                 scaled_x *= personal_gain;
                 scaled_y *= personal_gain;
+                // 拉枪曲线：目标误差 ≥ min_distance 时，在拉枪方向附加弧线/抖动（Y 轴附加量）。
+                // 位置在 personal_gain 之后、deadzone 之前（PullCurve.hpp 设计输出链顺序）。
+                // err 用控制域误差（control_x/y），out 用当前缩放输出（scaled_x/y）。
+                scaled_y += pull_curve_.apply(control_x, control_y, scaled_x, scaled_y,
+                                             pull_curve_cfg, dt_ms);
                 // output_deadzone（自适应死区基准）：低于死区的输出归零（防微抖）。
                 if (std::abs(scaled_x) < out_deadzone) scaled_x = 0.0f;
                 if (std::abs(scaled_y) < out_deadzone) scaled_y = 0.0f;

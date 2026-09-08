@@ -301,6 +301,11 @@ if(TTBOX_CORE_BUILD_TESTS)
   target_link_libraries(test_hotkey_gate PRIVATE ttbox_core)
   add_test(NAME test_hotkey_gate COMMAND test_hotkey_gate)
 
+  # 拉枪曲线注入 AimThread 输出链测试（4 个验收场景）
+  add_executable(test_pull_curve_aimthread tests/test_pull_curve_aimthread.cpp)
+  target_link_libraries(test_pull_curve_aimthread PRIVATE ttbox_core)
+  add_test(NAME test_pull_curve_aimthread COMMAND test_pull_curve_aimthread)
+
   # 热键完全可配置化验收（默认/换键/侧键/双键/any-all/免重启生效/未按键零输出）
   add_executable(test_hotkey_config tests/test_hotkey_config.cpp)
   target_link_libraries(test_hotkey_config PRIVATE ttbox_core)
