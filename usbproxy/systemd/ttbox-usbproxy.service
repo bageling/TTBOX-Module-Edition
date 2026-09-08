@@ -1,0 +1,22 @@
+[Unit]
+Description=TTBOX USB mouse passthrough proxy (YU-compatible)
+After=multi-user.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/ttbox/usbproxy
+Environment=USB_PROXY_DEVICE=fc000000.usb
+Environment=USB_PROXY_DRIVER=dwc3-gadget
+Environment=USB_PROXY_MODE=full
+ExecStartPre=-/usr/bin/systemctl stop usbdevice.service
+ExecStartPre=/usr/sbin/modprobe raw_gadget
+ExecStart=/opt/ttbox/usbproxy/board/run-ttbox-usb-proxy.sh
+Restart=always
+RestartSec=1
+KillSignal=SIGINT
+TimeoutStopSec=5
+SendSIGKILL=yes
+
+[Install]
+WantedBy=multi-user.target

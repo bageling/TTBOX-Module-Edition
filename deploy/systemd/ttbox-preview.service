@@ -1,0 +1,17 @@
+[Unit]
+Description=TTBOX Preview Plugin
+After=local-fs.target
+# 不 Wants ttbox-core：TTBOX core 需独占 HDMI RX（与 YU daemon 冲突），按需手动启动
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/ttbox/plugins/preview
+ExecStart=/opt/ttbox/plugins/preview/bin/ttbox-preview
+Environment=TTBOX_IPC_SOCKET=/tmp/ttbox_core.sock
+Environment=TTBOX_PREVIEW_HOST=127.0.0.1
+Environment=TTBOX_PREVIEW_PORT=8001
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

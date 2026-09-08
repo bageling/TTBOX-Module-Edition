@@ -1,0 +1,19 @@
+[Unit]
+Description=TTBOX Web Plugin
+After=local-fs.target
+# 不 Wants ttbox-core：TTBOX core 需独占 HDMI RX（与 YU daemon 冲突），按需手动启动
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/ttbox/plugins/web
+ExecStart=/opt/ttbox/plugins/web/bin/ttbox-web
+Environment=TTBOX_ROOT=/opt/ttbox/plugins/web
+Environment=PYTHONPATH=/opt/ttbox
+Environment=TTBOX_WEB_HOST=0.0.0.0
+Environment=TTBOX_WEB_PORT=8000
+Environment=TTBOX_PREVIEW_URL=http://127.0.0.1:8001
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

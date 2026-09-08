@@ -1,0 +1,126 @@
+# ============================================================
+# TTBOX-Module-Edition .gitignore
+# 规则：构建产物/缓存/临时文件/敏感信息 一律不入库
+# ============================================================
+
+# ---------- 构建产物 ----------
+core/build*/
+core/cmake-build*/
+**/CMakeFiles/
+**/CMakeCache.txt
+**/Makefile
+**/cmake_install.cmake
+*.o
+*.a
+*.so
+!lib/librknnrt.so
+*.d
+*.exe
+*.lib
+*.obj
+*.pdb
+*.ilk
+
+# ---------- Python 缓存 ----------
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+.venv/
+venv/
+
+# ---------- 日志与运行时 ----------
+*.log
+*.tmp
+/run/
+/tmp/
+core/dump/
+core/core.*
+
+# ---------- 大体积测试素材（不入库） ----------
+# 原始视频帧 / 大 raw 二进制
+*.raw
+*.h264
+*.yuv
+# PID Trace 采集 CSV（运行时产物，不入库）
+pid_trace*.csv
+# 大模型文件（.pt / .onnx / 大 .rknn；随附的已训练模型白名单入库）
+*.pt
+*.pth
+*.onnx
+*.rknn
+!models/installed/jwdl_sjzv11/model.rknn
+# 测试资产白名单：真实训练模型与测试资源入库
+!core/tests/data/*.onnx
+# 测试截图/预览/中间产物（不入库）
+*.bgr
+*.bmp
+core/tests/*.jpg
+core/tests/*.png
+core/tests/*.csv
+core/tests/*.bin
+core/tests/preview_raw.bin
+!core/tests/data/*.bgr
+core/tests/s*.log
+core/tests/*_mouse.log
+core/tests/*_traj.log
+core/tests/hf_*.log
+core/tests/*.raw
+
+# ---------- 备份与临时 ----------
+*.bak
+*.bak-*
+*~
+*.orig
+*.rej
+*.swp
+
+# ---------- 敏感信息 ----------
+# 私钥 / 凭据 / 本地配置
+keys/*private*.pem
+**/*private*.pem
+*.key
+*.pem
+.env
+.env.*
+*.local.json
+*_credentials*
+config/*secret*
+config/*credential*
+
+# ---------- 系统文件 ----------
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# ---------- IDE ----------
+.vscode/
+.idea/
+*.suo
+
+# ---------- 本地同步 / 临时备份 ----------
+# 板端同步脚本与快照（仅本地使用，不入库）
+.board_sync/
+# 顶层 build 目录（CI/本地编译残留）
+/build/
+# 临时 tar.gz 备份（已弃用）
+*.tar.gz
+
+# ---------- 临时抓包 / 调试文件 ----------
+# curl ... > ttbox_xxx_tmp.json 风格的临时输出
+ttbox_*_tmp.json
+# 顶层 sync 包/快照
+sync_board_*.tgz
+
+
+# ---------- 本地 Windows 宿主构建（第一阶段验证）----------
+/build-win-host/
+core/third_party/onnxruntime/lib/
+.venv-win/
+.wheels/
+build-win*/
+
+# ONNX Runtime 本地二进制与下载缓存
+core/third_party/onnxruntime/lib/
+ort.nupkg

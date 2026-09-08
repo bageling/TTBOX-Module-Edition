@@ -1,0 +1,17 @@
+{
+  "id": "model",
+  "name": "TTBOX Model Manager",
+  "version": "1.0.0",
+  "description": "TTBOX 模型管理插件",
+  "api_version": "1",
+  "entry": "bin/ttbox-model",
+  "type": "process",
+  "autostart": true,
+  "enabled": true,
+  "dependencies": ["core"],
+  "permissions": ["read_core_status", "manage_model", "read_config"],
+  "stop_timeout": 5,
+  "health_check": {"kind": "process"},
+  "config": "config",
+  "data": "data"
+}

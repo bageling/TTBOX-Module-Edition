@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>pid1.cpp 参考 vs YU 对照</title>
+<style>
+  body{font-family:'Microsoft YaHei',sans-serif;background:#0f1420;color:#e8eaf0;padding:30px;margin:0}
+  h1{font-size:22px;border-bottom:2px solid #2a3242;padding-bottom:12px}
+  h2{font-size:16px;color:#8fb8ff;margin-top:28px}
+  table{border-collapse:collapse;width:100%;max-width:880px;margin-top:14px;box-shadow:0 2px 12px rgba(0,0,0,.4)}
+  th{background:#1b2436;padding:10px 12px;text-align:left;font-size:13px;color:#9aa7bd}
+  td{padding:10px 12px;border-top:1px solid #232c40;font-size:14px}
+  tr:nth-child(even){background:#131a29}
+  .param{font-weight:600;color:#fff}
+  .note{color:#7dd0a0;font-size:12px}
+  .diff-hot{color:#ff9f68;font-weight:600}
+  .diff-same{color:#7dd0a0}
+  .axis{color:#6d7sonline;color:#8a97ad;font-size:12px}
+  .tag{display:inline-block;font-size:11px;padding:2px 7px;border-radius:10px;margin-left:6px;vertical-align:middle}
+  .tag-mine{background:#1e3a5f;color:#7fb9ff}
+  .tag-yu{background:#3a2a1e;color:#ffbe85}
+  ul{line-height:1.9}
+  li{font-size:14px}
+</style>
+</head>
+<body>
+<h1>PID 参数对照：pid1.cpp（你给的参考） vs YU（对照基线）</h1>
+
+<h2>一、核心 PID 参数对比（X 轴 / Y 轴）</h2>
+<table>
+  <tr><th style="width:24%">参数</th><th style="width:8%">轴</th><th style="width:20%">pid1.cpp（你的参考）</th><th style="width:20%">YU 对照</th><th>差异解读</th></tr>
+  <tr><td class="param">KP 比例</td><td class="axis">X</td><td class="diff-hot">25</td><td>7</td><td class="note">pid1 快 <b class="diff-hot">3.6 倍</b>，更激进</td></tr>
+  <tr><td></td><td class="axis">Y</td><td class="diff-hot">25</td><td>7</td><td class="note">快 3.6 倍，移动更快</td></tr>
+  <tr><td class="param">KD 微分（刹车）</td><td class="axis">X</td><td class="diff-hot">25</td><td>0</td><td class="note">pid1 有强微分刹车抑制抖动；YU 无 D</td></tr>
+  <tr><td></td><td class="axis">Y</td><td class="diff-hot">25</td><td>0</td><td class="note">同上</td></tr>
+  <tr><td class="param">KI 积分</td><td class="axis">X/Y</td><td class="diff-same">0 / 0</td><td>0 / 0</td><td class="note">两边都不用积分，一致</td></tr>
+  <tr><td class="param">PREDICT 前馈</td><td class="axis">X</td><td class="diff-hot">3.0</td><td>1.3</td><td class="note">pid1 前馈更快（2.3 倍）追左右移动目标</td></tr>
+  <tr><td></td><td class="axis">Y</td><td class="diff-same">0</td><td>1.2</td><td class="note"><b>方向相反：</b>pid1 Y 不带前馈，YU Y 带 1.2</td></tr>
+  <tr><td class="param">RATE 动态增益收敛</td><td class="axis">X</td><td>0.3</td><td>0.52</td><td class="note">pid1 收敛稍慢，起步更保守</td></tr>
+  <tr><td></td><td class="axis">Y</td><td>0.3</td><td>0.44</td><td class="note">同上</td></tr>
+  <tr><td class="param">SMOOTH 软限幅</td><td class="axis">X/Y</td><td class="diff-same">9900 / 9900</td><td>9900 / 9900</td><td class="note">完全一致（都不过滤）</td></tr>
+  <tr><td class="param">DEADZONE 死区</td><td class="axis">X</td><td>—（pid1 无此参数）</td><td>1.0</td><td class="note">YU 有死区防微抖；pid1 靠 KD 机制</td></tr>
+</table>
+
+<h2>二、结论（白话）</h2>
+<table>
+  <tr><th style="width:22%">维度</th><th>pid1.cpp（你给的参考）</th><th>YU 对照</th><th>影响</th></tr>
+  <tr><td class="param">整体速度风格</td><td class="diff-hot">快速、激进</td><td>温和</td><td>pid1 KP=25 约为 YU 3.6 倍，移动明显更快</td></tr>
+  <tr><td class="param">稳定性</td><td>SD 强（KD=25 刹车）</td><td>仅 P（无 D）</td><td>pid1 高速下也更稳、不易过冲；YU 靠低 KP 保稳</td></tr>
+  <tr><td class="param">追移动目标</td><td>X 带 3.0 前馈，Y 不带</td><td>X/Y 都带 1.2~1.3</td><td>pid1 只优化左右(FPS 目标横移)追得跟手，Y轴稳；YU 双轴都带</td></tr>
+  <tr><td class="param">起步手感</td><td>RATE=0.3 慢热</td><td>0.44~0.52</td><td>pid1 起步更平滑不冲；YU 起步更快黏</td></tr>
+</table>
+
+<h2>三、白话解读</h2>
+<ul>
+  <li><b>它们都能用</b>——算法是一个模子（都是 P_PID），只是<b>数值风格不同</b>：<span class="tag tag-mine">pid1</span>快而稳（KP大+KD刹车），<span class="tag tag-yu">YU</span>慢而柔（KP小+无D）。</li>
+  <li><b>最本质区别是 PREDICT 的 Y 轴</b>：pid1 把它设成 0（Y 不带前馈），YU 是 1.2。这就是为什么 pid1 的 Y 轴表现和 YU 明显不一样——<b>Y 轴不追移动，只做位置纠正</b>。</li>
+  <li><b>DEADZONE：</b>pid1.cpp 里根本没有这个参数（它靠 KD 在数值里防抖），YU 有死区。TTBOX 现在网页挂了个 output_deadzone 和 deadzone_x/y 两套，其实 pid1 不需要。</li>
+  <li><b>KI 两边都是 0</b>，都不会积分。</li>
+</ul>
+
+</body>
+</html>

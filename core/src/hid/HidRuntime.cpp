@@ -1,0 +1,273 @@
+// HidRuntime.cpp — HID Runtime 实现
+/*
+ * TTBOX 文件说明
+ *
+ * 文件：HidRuntime.cpp
+ *
+ * 作用：
+ *   HID（人机交互设备）运行时管理。
+ *   负责加载和卸载 HID 设备包，管理 HID 输出。
+ *
+ * 小白理解：
+ *   HID 就是 USB 鼠标、键盘这类设备的统称。
+ *   这个模块负责把 TTBOX 生成的鼠标指令包装成 USB 协议，
+ *   然后通过 USB 线发送给电脑，让电脑以为是真的鼠标在动。
+ *
+ * 注意：
+ *   本注释仅用于说明代码，不改变程序逻辑。
+ */
+
+#include "hid/HidRuntime.hpp"
+
+#if defined(_WIN32)
+namespace ttbox::core {
+const char* hid_runtime_status_name(HidRuntimeStatus) { return "unsupported"; }
+bool HidRuntime::start(std::string* error) {
+    if (error) *error = "Windows 不支持 HID Runtime";
+    return false;
+}
+void HidRuntime::stop() {}
+MouseState HidRuntime::get_mouse_state() const { return {}; }
+KeyboardState HidRuntime::get_keyboard_state() const { return {}; }
+HidRuntimeMetrics HidRuntime::get_metrics() const { return {}; }
+bool HidRuntime::setup_gadget_if_needed(std::string*) { return false; }
+bool HidRuntime::find_hidraw(const std::string&, const char*, std::string*) const { return false; }
+void HidRuntime::parse_state_from_forwarders() {}
+}  // namespace ttbox::core
+#else
+
+#include <dirent.h>
+#include <cstdio>
+#include <cstring>
+#include <fstream>
+#include <sys/stat.h>
+#include <unistd.h>
+
+#include "common/Logger.hpp"
+
+namespace ttbox::core {
+
+const char* hid_runtime_status_name(HidRuntimeStatus s) {
+    switch (s) {
+        case HidRuntimeStatus::kRunning: return "running";
+        case HidRuntimeStatus::kError: return "error";
+        default: return "stopped";
+    }
+}
+
+namespace {
+
+bool path_exists(const std::string& p) { return ::access(p.c_str(), F_OK) == 0; }
+
+// 列举 /dev/hidraw* 或 /dev/hidg*（按前缀）
+std::vector<std::string> list_dev(const std::string& prefix) {
+    std::vector<std::string> out;
+    DIR* d = ::opendir("/dev");
+    if (!d) return out;
+    struct dirent* e;
+    while ((e = ::readdir(d)) != nullptr) {
+        if (std::strncmp(e->d_name, prefix.c_str(), prefix.size()) == 0) {
+            out.push_back("/dev/" + std::string(e->d_name));
+        }
+    }
+    ::closedir(d);
+    return out;
+}
+
+}  // namespace
+
+bool HidRuntime::find_hidraw(const std::string& configured, const char* keyword,
+                             std::string* out) const {
+    if (!configured.empty() && path_exists(configured)) {
+        *out = configured;
+        return true;
+    }
+    const auto devs = list_dev("hidraw");
+    const std::string kw = keyword ? keyword : "";
+    // 匹配规则：
+    //   Mouse     → input 名称含 "Mouse"
+    //   Keyboard  → input 名称含 "Keyboard"；或 HID_PHYS 以 "input0" 结尾
+    //               （USB HID 惯例：interface 0 = 键盘，罗技 Receiver 亦是）
+    const bool is_kb = (kw == "Keyboard");
+    for (const auto& dev : devs) {
+        const std::string name = dev.substr(std::strlen("/dev/"));
+        const std::string dev_base = "/sys/class/hidraw/" + name + "/device";
+        // HID_PHYS 兜底（键盘）：usb-.../input0
+        if (is_kb) {
+            std::ifstream uf(dev_base + "/uevent");
+            std::string u;
+            std::getline(uf, u);  // 第一行不是 PHYS，直接读全部
+            uf.clear();
+            uf.seekg(0);
+            std::string phys;
+            std::string line;
+            while (std::getline(uf, line)) {
+                if (line.rfind("HID_PHYS=", 0) == 0) phys = line.substr(9);
+            }
+            if (phys.size() >= 7 && phys.compare(phys.size() - 7, 7, "/input0") == 0) {
+                *out = dev;
+                return true;
+            }
+        }
+        // input 名称关键词匹配
+        const std::string base = dev_base + "/input";
+        DIR* id = ::opendir(base.c_str());
+        if (!id) continue;
+        bool match = false;
+        struct dirent* ie;
+        while ((ie = ::readdir(id)) != nullptr) {
+            if (std::strncmp(ie->d_name, "input", 5) != 0) continue;
+            std::ifstream nf(base + "/" + ie->d_name + "/name");
+            std::string nm;
+            std::getline(nf, nm);
+            if (nm.find(kw) != std::string::npos) { match = true; break; }
+        }
+        ::closedir(id);
+        if (match) {
+            *out = dev;
+            return true;
+        }
+    }
+    if (!devs.empty()) {
+        *out = devs[0];  // 无匹配：退化为第一个（保持可用）
+        return true;
+    }
+    return false;
+}
+
+bool HidRuntime::setup_gadget_if_needed(std::string* error) {
+    // 已绑定则跳过
+    const std::string udc_state = std::string("/sys/class/udc/") + cfg_.udc + "/state";
+    std::ifstream st(udc_state);
+    std::string state;
+    std::getline(st, state);
+    if (state == "configured" || state == "attached") return true;
+
+    // 通过脚本建立 gadget（独立于 AI Runtime）
+    const std::string script = root_ + "/bin/a9_setup_hid_gadget.sh";
+    if (path_exists(script)) {
+        const std::string cmd = "bash " + script + " enable >/dev/null 2>&1";
+        const int rc = std::system(cmd.c_str());
+        if (rc != 0) {
+            if (error) *error = "gadget 启动脚本失败 rc=" + std::to_string(rc);
+            return false;
+        }
+        return true;
+    }
+    if (error) *error = "gadget 未配置且无启动脚本: " + script;
+    return false;
+}
+
+bool HidRuntime::start(std::string* error) {
+    if (status_.load() == HidRuntimeStatus::kRunning) return true;
+    if (root_.empty()) root_ = std::string(TTBOX_PROJECT_ROOT) + "/hid";
+
+    // 配置：优先注入，否则从包 config 加载
+    if (cfg_.gadget_name.empty()) {
+        cfg_ = HidPackageConfig::load(root_ + "/config/hid_config.json", nullptr);
+    }
+
+    // 1. 确保 gadget（configfs）
+    if (!setup_gadget_if_needed(error)) {
+        status_ = HidRuntimeStatus::kError;
+        return false;
+    }
+    // 2. 枚举输入设备 + 启动 forwarder（键盘/鼠标各一路）
+    std::string kb_hidraw, ms_hidraw;
+    const bool kb_ok = cfg_.keyboard_enabled &&
+                       find_hidraw(cfg_.keyboard_hidraw, "Keyboard", &kb_hidraw) &&
+                       path_exists(cfg_.keyboard_hidg);
+    const bool ms_ok = cfg_.mouse_enabled &&
+                       find_hidraw(cfg_.mouse_hidraw, "Mouse", &ms_hidraw) &&
+                       path_exists(cfg_.mouse_hidg);
+
+    if (!kb_ok && !ms_ok) {
+        if (error) *error = "无可用 HID 输入设备（hidraw 未枚举）且/或 gadget 不可用";
+        status_ = HidRuntimeStatus::kError;
+        return false;
+    }
+    std::vector<std::unique_ptr<HidForwarder>> fwds;
+    if (kb_ok) {
+        auto f = std::make_unique<HidForwarder>();
+        HidForwarder::Params p;
+        p.hidraw_path = kb_hidraw;
+        p.hidg_path = cfg_.keyboard_hidg;
+        p.kind = HidKind::kKeyboard;
+        p.cpu = cfg_.cpu_affinity;
+        p.raw_pass = false;  // 重编码为 boot 键盘 8 字节
+        std::string ferr;
+        if (!f->start(p, &ferr)) {
+            TTBOX_LOG_WARN("键盘 forwarder 启动失败: " + ferr);
+        } else {
+            fwds.push_back(std::move(f));
+        }
+    }
+    if (ms_ok) {
+        auto f = std::make_unique<HidForwarder>();
+        HidForwarder::Params p;
+        p.hidraw_path = ms_hidraw;
+        p.hidg_path = cfg_.mouse_hidg;
+        p.kind = HidKind::kMouse;
+        p.cpu = cfg_.cpu_affinity;
+        p.raw_pass = false;  // 重编码为 boot 鼠标 4 字节 + 过滤非鼠标报告
+        std::string ferr;
+        if (!f->start(p, &ferr)) {
+            TTBOX_LOG_WARN("鼠标 forwarder 启动失败: " + ferr);
+        } else {
+            fwds.push_back(std::move(f));
+        }
+    }
+    if (fwds.empty()) {
+        if (error) *error = "所有 forwarder 启动失败";
+        status_ = HidRuntimeStatus::kError;
+        return false;
+    }
+    forwarders_ = std::move(fwds);
+    status_ = HidRuntimeStatus::kRunning;
+    return true;
+}
+
+void HidRuntime::stop() {
+    if (status_.load() == HidRuntimeStatus::kStopped && forwarders_.empty()) return;
+    for (auto& f : forwarders_) f->stop();
+    forwarders_.clear();
+    status_ = HidRuntimeStatus::kStopped;
+}
+
+MouseState HidRuntime::get_mouse_state() const {
+    std::lock_guard<std::mutex> lk(state_mtx_);
+    return last_mouse_;
+}
+
+KeyboardState HidRuntime::get_keyboard_state() const {
+    std::lock_guard<std::mutex> lk(state_mtx_);
+    return last_keyboard_;
+}
+
+HidRuntimeMetrics HidRuntime::get_metrics() const {
+    HidRuntimeMetrics m;
+    m.status = status_.load();
+    for (const auto& f : forwarders_) {
+        const auto& s = f->stats();
+        m.rx_reports += s.rx_reports.load();
+        m.tx_reports += s.tx_reports.load();
+        m.drop += s.push_drops.load();
+        m.backpressure += s.tx_backpressure.load();
+        if (s.latency_us.count() > 0) {
+            m.latency_avg_us = s.latency_us.avg();
+            m.latency_p50_us = s.latency_us.percentile(50);
+            m.latency_p95_us = s.latency_us.percentile(95);
+            m.latency_p99_us = s.latency_us.percentile(99);
+        }
+        if (s.rx_interval_us.count() > 1) {
+            const double a = s.rx_interval_us.avg();
+            if (a > 0) m.report_rate_hz = 1e6 / a;
+        }
+        m.max_queue_depth += s.max_queue_depth.load();
+    }
+    return m;
+}
+
+}  // namespace ttbox::core
+
+#endif  // !_WIN32
