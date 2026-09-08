@@ -38,6 +38,7 @@ from ttbox_motion.calibration import (
     CalibrationObservation,
     CalibrationSession,
     CalibrationState,
+    derive_pid_params,
     fit_axis_measurements,
 )
 
@@ -2036,6 +2037,34 @@ def _calib_apply_gain(calib: dict) -> tuple[bool, str]:
         return False, str(exc)
 
 
+def _calib_apply_pid(calib: dict) -> tuple[bool, str]:
+    """自动调参核心：按标定实测 gain + 延迟推导整组 PID 参数并写回。
+
+    不同客户场景（屏幕灵敏度/DPI/系统延迟/游戏内灵敏度）→ 实测 gain/延迟不同
+    → 推导出不同的最佳 KP/KD/predict。只动这三个参数，rate/smooth 保持
+    架构常量；predict_y 保持 0（Y 轴无预测，pid1 参考行为）。
+    """
+    try:
+        pid = derive_pid_params(
+            float(calib.get('mouse_gain_x_px_per_count') or 0),
+            float(calib.get('mouse_gain_y_px_per_count') or 0),
+            float(calib.get('mouse_response_delay_ms') or 0),
+        )
+        prof = _get_runtime_profile()
+        if not prof:
+            return False, '读取 RuntimeProfile 失败'
+        mo = prof.setdefault('mouse', {})
+        mo['kp_x'] = pid['kp']
+        mo['kp_y'] = pid['kp']
+        mo['kd_x'] = pid['kd']
+        mo['kd_y'] = pid['kd']
+        mo['predict_x'] = pid['predict']
+        r = ipc_request('SET_CONFIG', {'profile': prof})
+        return r.get('status') == 0, r.get('error', '配置已更新')
+    except Exception as exc:
+        return False, str(exc)
+
+
 def _calib_worker() -> None:
     """真实标定闭环：稳定检测 → X 轴往返注入 → 目标位移(px) → gain=px/count。
     对齐 YU/旧后端：10 轮、幅度 8→32、中值去抖、Y 轴复用 X。
@@ -2231,11 +2260,21 @@ def _calib_worker() -> None:
             'capture': {'crop_size': int((_get_runtime_profile().get('preview') or {}).get('roi_w') or 320)},
             'rounds': len(axis_observations[CalibrationAxis.X]) + len(axis_observations[CalibrationAxis.Y]),
         }
+        # 自动调参：按实测 gain/延迟推导 KP/KD/predict（pid1 体系，见
+        # ttbox_motion/calibration.derive_pid_params + core/tools/pid_sim 仿真验证）
+        try:
+            calib['pid_params'] = derive_pid_params(gain_x, gain_y, delay_ms)
+        except Exception:
+            calib['pid_params'] = {}
         ok, detail = _write_calibration(calib)
         if ok:
             ok2, detail2 = _calib_apply_gain(calib)
-            ok = ok and ok2
             detail = detail + '；' + detail2
+            ok = ok and ok2
+            if ok2 and calib.get('pid_params'):
+                ok3, detail3 = _calib_apply_pid(calib)
+                detail = detail + '；' + detail3
+                ok = ok and ok3
         _calib_set(
             state='completed' if ok else 'failed',
             status='success' if ok else 'failed',
@@ -2350,11 +2389,21 @@ def update_auto_calibration():
     if ok:
         ok2, detail2 = _calib_apply_gain(calib)
         detail = detail + '；' + detail2
-        if ok2:
+        # 手动填增益同样联动自动调参（同一推导函数，保证行为一致）
+        try:
+            calib['pid_params'] = derive_pid_params(gain_x, gain_y, delay)
+        except Exception:
+            calib['pid_params'] = {}
+        if ok2 and calib.get('pid_params'):
+            ok3, detail3 = _calib_apply_pid(calib)
+            detail = detail + '；' + detail3
+            ok = ok and ok3
+            _write_calibration(calib)
+        if ok:
             _calib_set(status='manual', phase='done', ready=True, reason='completed')
         else:
-            # Core 未运行时文件已保存但 kp 未生效：不标记完成（诚实反映）
-            _calib_set(status='manual', phase='saved', ready=False, reason=detail2)
+            # Core 未运行时文件已保存但参数未生效：不标记完成（诚实反映）
+            _calib_set(status='manual', phase='saved', ready=False, reason=detail)
     resp = jsonify({'ok': ok, 'data': _calibration_payload(), 'detail': detail})
     resp.status_code = 200 if ok else 500
     return resp
@@ -2458,6 +2507,7 @@ def start_aim_trace():
                 pass
             time.sleep(0.02)
         try:
+            os.makedirs('/opt/ttbox/run', exist_ok=True)
             with open('/opt/ttbox/run/aim_trace.json', 'w') as f:
                 json.dump({'samples': _aim_trace['samples'], 'duration_sec': duration_sec}, f)
         except Exception:

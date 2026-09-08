@@ -162,3 +162,51 @@ def fit_axis_measurements(
         return result
     result.converged = True
     return result
+
+
+def derive_pid_params(
+    gain_x_px_per_count: float,
+    gain_y_px_per_count: float,
+    response_delay_ms: float,
+    *,
+    smooth: float = 9900.0,
+    bandwidth: float = 10000.0,
+) -> dict:
+    """由标定实测物理量自动推导 PID 参数（自动调参核心）。
+
+    依据 pid1 控制器数学（见 core/src/aim/Pid1Controller.hpp）：
+      - smooth=9900 时 Kp/Kd 通道被 soft-limit 压到 (bandwidth-smooth)/bandwidth，
+        即约 1%；Ki 通道固定压到 (bandwidth-1000)/bandwidth ≈ 90%。
+      - 单帧准星移动 ≈ 输出 × gain px。
+      - 不过冲约束：单帧移动 < 当前误差 → kp_eff × gain < 1。
+      - 响应目标：每帧吃掉约 20% 误差（时间常数 ≈5 帧 @133fps ≈ 37ms）。
+      - 阻尼：系统延迟越大，所需 KD 越大（抑制相位滞后振荡）。
+      - 积分：延迟越大，predict（Ki 通道增益）必须越小（上轮仿真证明
+        predict 过大 + 延迟 → 剧烈振荡）。
+
+    返回 kp/kd/predict 名义值（写入 RuntimeProfile 的 mouse 段）。
+    """
+    if gain_x_px_per_count <= 0 or gain_y_px_per_count <= 0:
+        raise ValueError("增益必须 > 0")
+    gain = min(gain_x_px_per_count, gain_y_px_per_count)
+    delay = max(0.0, float(response_delay_ms))
+    kp_scale = max((bandwidth - smooth) / bandwidth, 0.002)
+    # KP：以"单帧移动 ≤ 15% 误差"为目标（响应快且不过冲；比 20% 更保守，
+    # 实测高 gain+高延迟下 20% 会进入 Ki 正反馈极限环）
+    kp_eff = 0.15 / gain
+    kp = max(4.0, min(60.0, kp_eff / kp_scale))
+    # 极端场景（超高增益 + 高延迟）：命令在延迟窗口内过冲是极限环主因，
+    # 仿真扫描证明 KP 下限 4 可稳定（g1.5+d60 需要 kp≈4~7）
+    if gain >= 1.2 and delay >= 50.0:
+        kp = max(4.0, kp * 0.4)
+    # KD：阻尼随延迟线性增强（30ms→≈0.95×kp，60ms→≈1.2×kp）。
+    # 注意：KD 增强实验证明过阻尼不会消除高增益极限环，保持正常比例即可。
+    kd = max(4.0, min(50.0, kp * (0.7 + delay / 120.0)))
+    # predict（Ki 通道）：延迟越大越保守；上限 0.35（噪声下 Ki 正反馈
+    # 是振荡主因，见 core/tools/pid_sim 仿真结论），60ms 延迟降为 0.15
+    predict = max(0.1, min(0.35, 0.35 - delay / 300.0))
+    return {
+        'kp': round(kp, 2),
+        'kd': round(kd, 2),
+        'predict': round(predict, 3),
+    }

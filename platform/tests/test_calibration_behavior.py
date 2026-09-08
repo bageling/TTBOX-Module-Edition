@@ -5,6 +5,7 @@ from ttbox_motion.calibration import (
     CalibrationObservation,
     CalibrationState,
     CalibrationSession,
+    derive_pid_params,
     fit_axis_measurements,
 )
 
@@ -77,3 +78,39 @@ def test_calibration_session_has_explicit_state_transitions():
     session.fail("目标不稳定")
     assert session.state is CalibrationState.FAILED
     assert session.failure_reason == "目标不稳定"
+
+
+def test_derive_pid_params_scales_kp_inverse_to_gain():
+    # 增益越大（1 count 移动越多 px），KP 应越小以防过冲
+    low_gain = derive_pid_params(0.4, 0.4, 30)
+    high_gain = derive_pid_params(1.5, 1.5, 30)
+    assert low_gain["kp"] > high_gain["kp"]
+    assert 0.0 < low_gain["kp"] <= 60.0
+
+
+def test_derive_pid_params_increases_kd_with_delay():
+    low_delay = derive_pid_params(0.65, 0.65, 10)
+    high_delay = derive_pid_params(0.65, 0.65, 60)
+    assert high_delay["kd"] > low_delay["kd"]
+
+
+def test_derive_pid_params_reduces_predict_with_delay():
+    low_delay = derive_pid_params(0.65, 0.65, 10)
+    high_delay = derive_pid_params(0.65, 0.65, 60)
+    assert high_delay["predict"] < low_delay["predict"]
+    assert 0.1 <= high_delay["predict"] <= 0.35
+
+
+def test_derive_pid_params_handles_extreme_gain_delay():
+    # 超高增益 + 高延迟：KP 走保守分支，必须仍给出有效参数
+    d = derive_pid_params(1.5, 1.5, 60)
+    assert 4.0 <= d["kp"] <= 60.0
+    assert 4.0 <= d["kd"] <= 50.0
+    assert 0.1 <= d["predict"] <= 0.35
+
+
+def test_derive_pid_params_rejects_zero_gain():
+    import pytest as _p
+
+    with _p.raises(ValueError):
+        derive_pid_params(0.0, 0.65, 30)
