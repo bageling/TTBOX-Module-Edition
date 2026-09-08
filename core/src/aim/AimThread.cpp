@@ -41,9 +41,11 @@ void AimThread::loop() {
             // 修复点：此前写死 0.0f 导致 Web 置信度阈值参数无效（中看不中用）。
             float out_sensitivity = 1.0f, out_scale = 1.0f;
             float out_deadzone = 1.0f;
+            float recoil_px_per_count = 0.65f;  // 压枪 px→count 换算（默认 0.65 px/count，标定可覆盖）
             PersonalMotionConfig personal_motion;
             PullCurveConfig pull_curve_cfg;  // 拉枪曲线配置（默认 enabled=true, min_distance=80, strength=0.8）
             PersonalTrajectoryConfig personal_traj_cfg;  // 拟人化整形引擎配置（默认 enabled=false，保持现有行为）
+            RecoilConfig recoil_cfg;  // 压枪配置（默认 enabled=false，保持现有行为）
             float kp_x = 0.0f, kp_y = 0.0f, kd_x = 0.0f, kd_y = 0.0f;
             AimPointProfile aim_point;
             LockConfirmConfig lock_confirm_cfg;  // 目标锁定确认（ENTER/HOLD，第2项）
@@ -63,10 +65,13 @@ void AimThread::loop() {
                     out_sensitivity = profile->mouse.sensitivity;
                     out_scale = profile->mouse.output_scale;
                     out_deadzone = profile->mouse.output_deadzone;
+                    recoil_px_per_count = profile->mouse.gain_y_px_per_count > 0.05f
+                                              ? profile->mouse.gain_y_px_per_count : 0.65f;
                     personal_motion = profile->mouse.personal_motion;
                     pull_curve_cfg = profile->mouse.pull_curve;
                     personal_traj_cfg = profile->mouse.personal_trajectory;
                     lock_confirm_cfg = profile->mouse.lock_confirm;
+                    recoil_cfg = profile->mouse.recoil;
                     pid_x_.configure(kp_x, kd_x, profile->mouse.predict_x,
                                      profile->mouse.rate_x, profile->mouse.smooth_x);
                     pid_y_.configure(kp_y, kd_y, profile->mouse.predict_y,
@@ -144,6 +149,7 @@ void AimThread::loop() {
                     pid_x_.reset(); pid_y_.reset(); controller_.reset(); remainder_x_ = remainder_y_ = 0.0f;
                     pull_curve_.reset();  // 拉枪曲线时间基准清零（新目标重新拉枪）
                     personal_shader_.reset();  // 拟人化整形重置（新目标重新整形）
+                    recoil_.reset();  // 压枪计时/残差清零（新目标重新压枪）
                 }
                 last_target_id_ = selected.target_id;
                 // AIBOX 对标：不做位置外推；误差直接来自本帧检测结果。
@@ -199,6 +205,16 @@ void AimThread::loop() {
                 // err 用控制域误差（control_x/y），out 用当前缩放输出（scaled_x/y）。
                 scaled_y += pull_curve_.apply(control_x, control_y, scaled_x, scaled_y,
                                              pull_curve_cfg, dt_ms);
+                // 压枪（recoil）：开火期间持续下压补偿后坐力。
+                // 位置在 pull_curve 之后、deadzone 之前（与 pull_curve 同一注入点语义）。
+                // 压枪量（count 域）与 PID 输出融合，之后统一走 deadzone → remainder →
+                // int16 → 拟人化整形 → 热键安全门；Gate 关闭时最终输出仍被归零。
+                {
+                    const auto rd = recoil_.update(hotkey_bits, selected.valid, recoil_cfg, dt_ms,
+                                                   recoil_px_per_count);
+                    scaled_y += rd.y;  // 下压为正（目标偏下方向）
+                    scaled_x += rd.x;  // 拟人 X 微动（可正可负）
+                }
                 // output_deadzone（自适应死区基准）：低于死区的输出归零（防微抖）。
                 if (std::abs(scaled_x) < out_deadzone) scaled_x = 0.0f;
                 if (std::abs(scaled_y) < out_deadzone) scaled_y = 0.0f;

@@ -341,6 +341,23 @@ JsonValue RuntimeProfile::to_json() const {
     lk.set("instant_enter_dist", JsonValue::number(static_cast<double>(mouse.lock_confirm.instant_enter_dist)));
     lk.set("instant_enter_conf", JsonValue::number(static_cast<double>(mouse.lock_confirm.instant_enter_conf)));
     m.set("lock_confirm", std::move(lk));
+    // 压枪（recoil）：开火期间下压补偿后坐力（YU 压枪 12 参数语义，输出链基于 TTBOX 自身）
+    JsonValue rc = JsonValue::object();
+    rc.set("enabled", JsonValue::boolean(mouse.recoil.enabled));
+    rc.set("hotkey", JsonValue::number(static_cast<double>(mouse.recoil.hotkey)));
+    rc.set("hotkey2", JsonValue::number(static_cast<double>(mouse.recoil.hotkey2)));
+    rc.set("hotkey_mode", JsonValue::number(static_cast<double>(mouse.recoil.hotkey_mode)));
+    rc.set("only_when_target_visible", JsonValue::boolean(mouse.recoil.only_when_target_visible));
+    rc.set("target_lost_release_ms", JsonValue::number(static_cast<double>(mouse.recoil.target_lost_release_ms)));
+    rc.set("trigger_delay_enabled", JsonValue::boolean(mouse.recoil.trigger_delay_enabled));
+    rc.set("trigger_delay_ms", JsonValue::number(static_cast<double>(mouse.recoil.trigger_delay_ms)));
+    rc.set("strength", JsonValue::number(static_cast<double>(mouse.recoil.strength)));
+    rc.set("speed", JsonValue::number(static_cast<double>(mouse.recoil.speed)));
+    rc.set("humanize_enabled", JsonValue::boolean(mouse.recoil.humanize_enabled));
+    rc.set("humanize_curve_strength", JsonValue::number(static_cast<double>(mouse.recoil.humanize_curve_strength)));
+    rc.set("humanize_jitter_px", JsonValue::number(static_cast<double>(mouse.recoil.humanize_jitter_px)));
+    rc.set("humanize_jitter_frequency", JsonValue::number(static_cast<double>(mouse.recoil.humanize_jitter_frequency)));
+    m.set("recoil", std::move(rc));
     JsonValue ha = JsonValue::object();
     ha.set("enabled", JsonValue::boolean(mouse.aim_point.head_aim.enabled));
     ha.set("head_offset_top_fraction", JsonValue::number(static_cast<double>(mouse.aim_point.head_aim.head_offset_top_fraction)));
@@ -528,6 +545,23 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
             p.mouse.lock_confirm.instant_enter_enabled = obj_bool(*lk, "instant_enter_enabled", true);
             p.mouse.lock_confirm.instant_enter_dist = static_cast<float>(obj_num(*lk, "instant_enter_dist", 105.0));
             p.mouse.lock_confirm.instant_enter_conf = static_cast<float>(obj_num(*lk, "instant_enter_conf", 0.50));
+        }
+        // 压枪（recoil）解析：缺失字段用 YU 默认值（全部关/零输出，保持旧行为）
+        if (const JsonValue* rk = m->find("recoil"); rk && rk->is_object()) {
+            p.mouse.recoil.enabled = obj_bool(*rk, "enabled", false);
+            p.mouse.recoil.hotkey = static_cast<int>(obj_int(*rk, "hotkey", 1));
+            p.mouse.recoil.hotkey2 = static_cast<int>(obj_int(*rk, "hotkey2", 0));
+            p.mouse.recoil.hotkey_mode = static_cast<int>(obj_int(*rk, "hotkey_mode", 1));
+            p.mouse.recoil.only_when_target_visible = obj_bool(*rk, "only_when_target_visible", true);
+            p.mouse.recoil.target_lost_release_ms = static_cast<float>(obj_num(*rk, "target_lost_release_ms", 200.0));
+            p.mouse.recoil.trigger_delay_enabled = obj_bool(*rk, "trigger_delay_enabled", false);
+            p.mouse.recoil.trigger_delay_ms = static_cast<float>(obj_num(*rk, "trigger_delay_ms", 120.0));
+            p.mouse.recoil.strength = static_cast<float>(obj_num(*rk, "strength", 0.0));
+            p.mouse.recoil.speed = static_cast<float>(obj_num(*rk, "speed", 1.0));
+            p.mouse.recoil.humanize_enabled = obj_bool(*rk, "humanize_enabled", true);
+            p.mouse.recoil.humanize_curve_strength = static_cast<float>(obj_num(*rk, "humanize_curve_strength", 0.45));
+            p.mouse.recoil.humanize_jitter_px = static_cast<float>(obj_num(*rk, "humanize_jitter_px", 0.25));
+            p.mouse.recoil.humanize_jitter_frequency = static_cast<float>(obj_num(*rk, "humanize_jitter_frequency", 8.0));
         }
         if (const JsonValue* ha = m->find("head_aim"); ha && ha->is_object()) {
             auto obj_num2 = [&](const char* k, double d) {

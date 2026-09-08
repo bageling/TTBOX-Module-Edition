@@ -463,6 +463,34 @@ def yu_body_to_profile(body: dict) -> dict:
     if lock_confirm:
         mouse['lock_confirm'] = lock_confirm
 
+    # 压枪（recoil）—— mouse.recoil.*（YU 压枪 12 参数语义，基于 TTBOX 输出链）
+    # YU 前端提交在 body 顶层 recoil 块；hotkey 为字符串（'left'/'right'/''）→ 位掩码，
+    # hotkey_mode：'all'/'any' → 2/1
+    rk = body.get('recoil') or {}
+    recoil = {}
+    if rk.get('enabled') is not None:
+        recoil['enabled'] = bool(rk['enabled'])
+    if rk.get('hotkey') is not None:
+        recoil['hotkey'] = _hotkey_to_bits(rk['hotkey'], 1) or 1
+    if rk.get('hotkey2') is not None:
+        recoil['hotkey2'] = _hotkey_to_bits(rk['hotkey2'], 0)
+    if rk.get('hotkey_mode') is not None:
+        recoil['hotkey_mode'] = 2 if str(rk['hotkey_mode']) == 'all' else 1
+    for yk, tk in [('only_when_target_visible', 'only_when_target_visible'),
+                   ('target_lost_release_ms', 'target_lost_release_ms'),
+                   ('trigger_delay_enabled', 'trigger_delay_enabled'),
+                   ('trigger_delay_ms', 'trigger_delay_ms'),
+                   ('strength', 'strength'),
+                   ('speed', 'speed'),
+                   ('humanize_enabled', 'humanize_enabled'),
+                   ('humanize_curve_strength', 'humanize_curve_strength'),
+                   ('humanize_jitter_px', 'humanize_jitter_px'),
+                   ('humanize_jitter_frequency', 'humanize_jitter_frequency')]:
+        if rk.get(yk) is not None:
+            recoil[tk] = rk[yk]
+    if recoil:
+        mouse['recoil'] = recoil
+
     # 头部瞄准约束（第3项）—— mouse.head_aim.*
     head_aim = {}
     if ctrl.get('head_aim_enabled') is not None:
@@ -608,6 +636,7 @@ def profile_to_yu(prof: dict) -> dict:
     personal_traj = mouse.get('personal_trajectory') or {}
     lock_confirm = mouse.get('lock_confirm') or {}
     head_aim = mouse.get('head_aim') or {}
+    recoil = mouse.get('recoil') or {}
     ctrl = {
         'kp_x': mouse.get('kp_x'), 'kp_y': mouse.get('kp_y'),
         'kd_x': mouse.get('kd_x'), 'kd_y': mouse.get('kd_y'),
@@ -687,7 +716,22 @@ def profile_to_yu(prof: dict) -> dict:
             'class_offsets': mouse.get('class_offsets', []),
             'offset_switch_enabled': False, 'offset_switch_hotkey': '',
         }],
-        'recoil': {}, 'rapid_fire': {}, 'auto_back_flick': {}, 'crosshair': {},
+        'recoil': {
+            'enabled': recoil.get('enabled', False),
+            'only_when_target_visible': recoil.get('only_when_target_visible', True),
+            'target_lost_release_ms': recoil.get('target_lost_release_ms', 200),
+            'hotkey': _bits_to_hotkey(recoil.get('hotkey', 1)) or 'left',
+            'hotkey2': _bits_to_hotkey(recoil.get('hotkey2', 0)),
+            'hotkey_mode': 'all' if recoil.get('hotkey_mode') == 2 else 'any',
+            'trigger_delay_enabled': recoil.get('trigger_delay_enabled', False),
+            'trigger_delay_ms': recoil.get('trigger_delay_ms', 120),
+            'strength': recoil.get('strength', 0),
+            'speed': recoil.get('speed', 1),
+            'humanize_enabled': recoil.get('humanize_enabled', True),
+            'humanize_curve_strength': recoil.get('humanize_curve_strength', 0.45),
+            'humanize_jitter_px': recoil.get('humanize_jitter_px', 0.25),
+            'humanize_jitter_frequency': recoil.get('humanize_jitter_frequency', 8.0),
+        }, 'rapid_fire': {}, 'auto_back_flick': {}, 'crosshair': {},
         'auto_trigger': {'enabled': False, 'profiles': []},
         'hotkey_guard': {'enabled': False, 'toggle_hotkey': 'middle'},
         'mouse_output': {'mode': 'passthrough'},

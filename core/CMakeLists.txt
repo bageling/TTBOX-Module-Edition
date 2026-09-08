@@ -326,6 +326,11 @@ if(TTBOX_CORE_BUILD_TESTS)
                         target_link_libraries(test_bytetrack_upgrade PRIVATE ttbox_core)
                         add_test(NAME test_bytetrack_upgrade COMMAND test_bytetrack_upgrade)
 
+                        # 压枪引擎（recoil assist：触发/延迟/目标门控/残差/ramp/微动）单元测试
+                        add_executable(test_recoil tests/test_recoil.cpp)
+                        target_link_libraries(test_recoil PRIVATE ttbox_core)
+                        add_test(NAME test_recoil COMMAND test_recoil)
+
     # 热键完全可配置化验收（默认/换键/侧键/双键/any-all/免重启生效/未按键零输出）
   add_executable(test_hotkey_config tests/test_hotkey_config.cpp)
   target_link_libraries(test_hotkey_config PRIVATE ttbox_core)

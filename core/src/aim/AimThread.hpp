@@ -19,6 +19,7 @@
 #include "mouse/AimTracker.hpp"
 #include "mouse/PullCurve.hpp"
 #include "mouse/PersonalTrajectoryShader.hpp"
+#include "mouse/RecoilController.hpp"
 namespace ttbox::core::aim {
 class AimThread {
 public:
@@ -117,6 +118,7 @@ private:
     AimTracker tracker_;            // 第15阶段：目标跟踪器（速度估计+预测）
     PullCurve pull_curve_;          // 拉枪曲线：远距离拉枪时附加弧线/抖动（deadzone 前生效）
     PersonalTrajectoryShader personal_shader_;  // 拟人化整形引擎：Fitts 时长+包络+垂直抖动（Gate 前生效）
+    RecoilController recoil_;       // 压枪引擎：开火期间下压（pull_curve 后、deadzone 前注入 scaled_y）
     float target_age_ms_ = 0.0f;                    // 当前选中目标年龄（ms，拟人化整形用）
     float prediction_time_s_ = 0.0f;  // 第15阶段：预测时域（秒；0=关闭预测，保持原行为）
     uint64_t last_timestamp_us_ = 0;
