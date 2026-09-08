@@ -10,13 +10,13 @@
 
 ## 当前状态
 
-- 核心已有 AlphaBetaGammaFilter 滤波算法（`core/src/aim/AlphaBetaGammaFilter.hpp`）
-- 该算法在 AimThread 中已使用（`AimThread.cpp` 的 `AimStateMachine` 中）
+- 核心已有 AimTracker 目标跟踪器（`core/src/mouse/AimTracker.hpp`）
+- 该跟踪器在 AimThread 中已接入（AimThread.cpp 第 15 阶段：速度估计+预测）
 - 缺少独立的预测参数配置和 Web UI 控制
 
 ## 依赖
 
-- AlphaBetaGammaFilter（核心已实现）
+- AimTracker（核心已实现）
 - AimThread（核心已实现）
 
 ## 完成标准

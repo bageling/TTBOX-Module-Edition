@@ -45,5 +45,5 @@
 |---|---|
 | `core/src/aim/AimThread.cpp/.hpp` | 瞄准线程（主循环） |
 | `core/src/aim/Pid1Controller.hpp` | PID 控制器 |
-| `core/src/aim/AlphaBetaGammaFilter.hpp` | 运动预测滤波 |
+| `core/src/aim/AimTracker.hpp` | 运动预测滤波（目标跟踪器） |
 | `core/src/pipeline/AimTargetMailbox.hpp` | 目标数据信箱（跨线程传递） |

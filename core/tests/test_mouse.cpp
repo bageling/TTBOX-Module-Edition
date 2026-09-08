@@ -22,7 +22,6 @@
 #include "mouse/OutputScale.hpp"
 #include "mouse/PullCurve.hpp"
 #include "mouse/RateLimit.hpp"
-#include "mouse/Smooth.hpp"
 #include "mouse/TargetSelector.hpp"
 #include "model/RuntimeProfile.hpp"
 

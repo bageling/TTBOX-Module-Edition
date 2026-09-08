@@ -105,7 +105,7 @@ void AimThread::loop() {
             event.now_ms = task.timestamp_us / 1000ULL;
             event.target_confidence = selected.valid ? selected.box.score : 0.0f;
             event.target_distance = selected.distance;
-            if (state_machine_.update(event, scfg.lost_grace_ms, lock_confirm_cfg)) { controller_.reset(); pid_x_.reset(); pid_y_.reset(); remainder_x_=0.0f; remainder_y_=0.0f; last_target_id_=-1; }
+            if (state_machine_.update(event, scfg.lost_grace_ms, lock_confirm_cfg)) { pid_x_.reset(); pid_y_.reset(); remainder_x_=0.0f; remainder_y_=0.0f; last_target_id_=-1; }
             int16_t move_x = 0, move_y = 0; float ex = 0.0f, ey = 0.0f;
             float pred_ex = 0.0f, pred_ey = 0.0f;  // 第15阶段：预测误差
             float tx = 0.0f, ty = 0.0f, ref_x = 0.0f, ref_y = 0.0f;
@@ -146,7 +146,7 @@ void AimThread::loop() {
                 }
                 if (last_target_id_ != -1 && selected.target_id != last_target_id_) {
                     // 目标切换：速度/加速度来自旧目标，必须清除预测状态。
-                    pid_x_.reset(); pid_y_.reset(); controller_.reset(); remainder_x_ = remainder_y_ = 0.0f;
+                    pid_x_.reset(); pid_y_.reset(); remainder_x_ = remainder_y_ = 0.0f;
                     pull_curve_.reset();  // 拉枪曲线时间基准清零（新目标重新拉枪）
                     personal_shader_.reset();  // 拟人化整形重置（新目标重新整形）
                     recoil_.reset();  // 压枪计时/残差清零（新目标重新压枪）

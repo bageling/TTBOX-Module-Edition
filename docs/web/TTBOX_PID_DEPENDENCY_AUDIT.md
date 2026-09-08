@@ -208,6 +208,24 @@ lock_confirm/head_aim 的 enabled 开关
 | 5 | gain_x_px_per_count 半死（只写不读） | X 轴标定结果压枪用不上 | 确认 YU 语义后决定消费侧 |
 | 6 | 死参数 15 个仍序列化落盘 | default.json 冗余 | 待用户确认后清理（涉及 Web 翻译层同步） |
 
+---
+
+## 八、清理执行记录（2026-09-08，用户批准）
+
+| 操作 | 内容 | 验证 |
+|---|---|---|
+| 删除 | `core/src/mouse/Smooth.hpp`（零引用，测试仅挂名 include） | 109/109 PASS |
+| 删除 | `core/src/aim/AlphaBetaGammaFilter.hpp`（零引用，仅文档提及） | 109/109 PASS |
+| 删除 | AimThread.hpp 的 `MotionController controller_` 死成员 + include；AimThread.cpp 两处 `controller_.reset()` | 109/109 PASS |
+| 保留 | OutputScale.hpp（test_mouse.cpp L414 有 output_scale_x 真实测试） | 已恢复 |
+| 保留 | MotionController.hpp / Deadzone.hpp / RateLimit.hpp / MotionMerge.hpp / ContinuousLead.hpp / Humanize.hpp / MouseProxyMode.hpp（test_mouse.cpp 均有 V1 行为契约测试） | — |
+| 保留 | controller/PidController + IController（5 个测试依赖） | — |
+| 文档 | modules/07-controller/README.md 与 docs/product/features/prediction.md 中 ABG 引用改为 AimTracker | — |
+| 不动 | 死参数字段 15 个（涉及 default.json/Web 兼容，待单独确认） | — |
+
+> 清理原则：只删**生产链路零引用**的代码；有测试契约的 V1 组件（MotionController/Deadzone/RateLimit/MotionMerge 等）保留文件但已从生产链路摘除死成员。
+
+
 
 
 

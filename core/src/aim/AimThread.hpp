@@ -10,7 +10,6 @@
 #include "pipeline/AimTargetMailbox.hpp"
 #include "output/IHidOutput.hpp"
 #include "mouse/AimStateMachine.hpp"
-#include "mouse/MotionController.hpp"
 #include "mouse/TargetSelector.hpp"
 #include "model/RuntimeProfile.hpp"
 #include "aim/Pid1Controller.hpp"
@@ -109,7 +108,6 @@ private:
     RuntimeConfig* runtime_config_ = nullptr;
     std::atomic<uint16_t>* physical_buttons_ = nullptr;
     TargetSelector selector_;
-    MotionController controller_;
     Pid1Controller pid_x_;   // P_PID：X 轴（predict=3.0）
     Pid1Controller pid_y_;   // P_PID：Y 轴（predict=0.0）
     AimStateMachine state_machine_;
