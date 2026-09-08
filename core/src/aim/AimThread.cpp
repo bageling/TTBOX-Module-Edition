@@ -109,6 +109,7 @@ void AimThread::loop() {
             int16_t move_x = 0, move_y = 0; float ex = 0.0f, ey = 0.0f;
             float pred_ex = 0.0f, pred_ey = 0.0f;  // 第15阶段：预测误差
             float tx = 0.0f, ty = 0.0f, ref_x = 0.0f, ref_y = 0.0f;
+            float smooth_tx = 0.0f, smooth_ty = 0.0f;  // 第15阶段：平滑后瞄准点（滤检测框抖动，遥测/控制共用）
             float aibox_x = 0.0f, aibox_y = 0.0f, scaled_x = 0.0f, scaled_y = 0.0f;
             bool fov_mode_active = false;  // FOV 模式：fov_move 已是 count 域最终移动量，旁路 PID 的 kp×err
             float fov_out_x = 0.0f, fov_out_y = 0.0f;  // FOV 模式输出（count 域）
@@ -142,7 +143,16 @@ void AimThread::loop() {
                     tracker_.reset();
                 }
                 tracker_.update(tx, ty, selected.target_id, task.timestamp_us);
-                float pred_tx = tx, pred_ty = ty;
+                // 第15阶段：控制误差必须用「平滑后瞄准点」。
+                // 此前 prediction_time_s_=0 时 control 直接用原始 ex/ey，
+                // 检测框上边缘 y1 帧间跳变（±18px，模型头顶边界）直接进 PID：
+                //   K_p 输出 ±2 count + K_d 反向 ±4 count → 输出在 deadzone(1.0)
+                //   反复穿越 → 「停顿（阻塞）+ 锁定后上下抖动」。
+                // 平滑位置来自 AimTracker 内置 One-Euro（min_cutoff=0.8Hz），
+                // 预测关闭时也用它做控制误差（不平滑只做速度估计）。
+                smooth_tx = tracker_.state().x;
+                smooth_ty = tracker_.state().y;
+                float pred_tx = smooth_tx, pred_ty = smooth_ty;
                 if (prediction_time_s_ > 0.0f) {
                     tracker_.predict(prediction_time_s_, &pred_tx, &pred_ty);
                 }
@@ -164,8 +174,8 @@ void AimThread::loop() {
                 ey = ty - ref_y;
                 pred_ex = pred_tx - ref_x;
                 pred_ey = pred_ty - ref_y;
-                float control_x = (prediction_time_s_ > 0.0f) ? pred_ex : ex;
-                float control_y = (prediction_time_s_ > 0.0f) ? pred_ey : ey;
+                float control_x = (prediction_time_s_ > 0.0f) ? pred_ex : (smooth_tx - ref_x);
+                float control_y = (prediction_time_s_ > 0.0f) ? pred_ey : (smooth_ty - ref_y);
                 if (runtime_config_) {
                     auto profile = runtime_config_->snapshot();
                     if (profile) {
@@ -341,8 +351,6 @@ void AimThread::loop() {
             status_.has_target = selected.valid;
             status_.target_id = selected.valid ? selected.target_id : -1;
             status_.target_class_id = selected.valid ? selected.box.class_id : -1;
-            status_.target_width = selected.valid ? selected.box.x2 - selected.box.x1 : 0.0f;
-            status_.target_height = selected.valid ? selected.box.y2 - selected.box.y1 : 0.0f;
             // 显示框使用同一目标的关联检测框并集，避免只显示头/躯干局部框。
             // 控制链仍使用 selected.box，显示框扩展不会改变瞄准行为。
             if (selected.valid) {
@@ -370,15 +378,41 @@ void AimThread::loop() {
                         display_y2 = std::max(display_y2, candidate.y2);
                     }
                 }
+                // 显示框 One-Euro 平滑：检测框上边缘 y1 帧间跳变 ±18px（模型头顶边界），
+                // 平滑后预览框稳定、标定稳定检测（aim_pos_x/y + width/height 变化 <5%）可过。
+                // 目标切换时重建平滑状态（新目标坐标完全不同，避免旧轨迹拖尾）。
+                if (last_display_target_id_ != selected.target_id) {
+                    display_smooth_x1_.reset();
+                    display_smooth_y1_.reset();
+                    display_smooth_x2_.reset();
+                    display_smooth_y2_.reset();
+                    last_display_target_id_ = selected.target_id;
+                }
+                const float display_dt = last_display_ts_us_ > 0 &&
+                                                 task.timestamp_us > last_display_ts_us_
+                                             ? static_cast<float>(task.timestamp_us - last_display_ts_us_) /
+                                                   1000000.0f
+                                             : 0.004f;
+                last_display_ts_us_ = task.timestamp_us;
+                display_x1 = display_smooth_x1_.update(display_x1, display_dt);
+                display_y1 = display_smooth_y1_.update(display_y1, display_dt);
+                display_x2 = display_smooth_x2_.update(display_x2, display_dt);
+                display_y2 = display_smooth_y2_.update(display_y2, display_dt);
                 status_.target_x1 = display_x1;
                 status_.target_y1 = display_y1;
                 status_.target_x2 = display_x2;
                 status_.target_y2 = display_y2;
+                // 尺寸用平滑后的显示框：标定稳定检测（_calib_target）读 width/height，
+                // 原始 h 因 y1 抖动 7.5% > 5% 阈值会导致「目标稳定检测超时」。
+                status_.target_width = display_x2 - display_x1;
+                status_.target_height = display_y2 - display_y1;
             } else {
                 status_.target_x1 = 0.0f;
                 status_.target_y1 = 0.0f;
                 status_.target_x2 = 0.0f;
                 status_.target_y2 = 0.0f;
+                status_.target_width = 0.0f;
+                status_.target_height = 0.0f;
             }
             if (selected.valid) ++status_.target_frames; else ++status_.no_target_frames;
             uint32_t active_tracks = 0;
@@ -386,8 +420,12 @@ void AimThread::loop() {
                 if (te.active) ++active_tracks;
             }
             status_.tracks = active_tracks;
-            status_.predicted_x = selected.valid ? (selected.box.x1 + selected.box.x2) * 0.5f : 0.0f;
-            status_.predicted_y = selected.valid ? (selected.box.y1 + (selected.box.y2 - selected.box.y1) * 0.15f) : 0.0f;
+            // 遥测：平滑后瞄准点（滤检测框 y1 抖动）。
+            // CoreRuntime 把 predicted_x/y 映射为 metrics.aim_pos_x/y，
+            // 标定稳定检测（_calib_target 的 center jitter <1px）读的就是它，
+            // 必须用平滑位置，否则 18px 级框抖动直接导致「目标稳定检测超时」。
+            status_.predicted_x = selected.valid ? smooth_tx : 0.0f;
+            status_.predicted_y = selected.valid ? smooth_ty : 0.0f;
             status_.target_point_x = selected.valid ? tx : 0.0f;
             status_.target_point_y = selected.valid ? ty : 0.0f;
             status_.reference_x = selected.valid ? ref_x : 0.0f;

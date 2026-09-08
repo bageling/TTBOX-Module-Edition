@@ -48,6 +48,24 @@ private:
     static constexpr uint64_t kMaxDtUs = 200000;   // 200ms 视为目标切换/跳跃
     static constexpr float kVelEmaAlpha = 0.4f;    // 速度 EMA 系数（降抖动）
     static constexpr float kMaxVelPxPerSec = 2500.0f;  // 速度 clamp
+    // OneEuro 位置平滑（滤检测框抖动，如人体框上边缘 y1 帧间跳变 ±18px）：
+    //   - min_cutoff：目标静止（速度≈0）时截止频率压到 0.8Hz，高频框噪声被强衰减
+    //   - beta：目标真实移动时截止频率随速度升高（低延迟跟随，稳态滞后 <1.5px@100px/s）
+    //   - d_cutoff：速度信号本身的低通截止（防止噪声速度尖峰抬高位置截止）
+    // 实测：18.2px 抖动脉冲 → 平滑后逐帧 step ≤3.5px（衰减 80%），静止无滞后
+    static constexpr float kPosMinCutoffHz = 0.8f;
+    static constexpr float kPosBeta = 0.10f;
+    static constexpr float kPosDCutoffHz = 1.0f;
+    // OneEuro 平滑器状态（不进 TrackedTarget，state() 只暴露平滑后位置）
+    float pos_fx_ = 0.0f;      // 平滑后位置（低通输出）
+    float pos_fy_ = 0.0f;
+    float pos_fdx_ = 0.0f;     // 平滑后速度（低通输出）
+    float pos_fdy_ = 0.0f;
+    bool pos_valid_ = false;   // 平滑器是否已建立（目标切换/重置后清 false）
+    // 原始输入缓存（速度估计专用：raw_vx 必须用原始帧差，
+    // 若用平滑后位置帧差会被双重平滑 → 速度收敛慢 → 预测超前不足）
+    float raw_prev_x_ = 0.0f;
+    float raw_prev_y_ = 0.0f;
     TrackedTarget state_;
 };
 

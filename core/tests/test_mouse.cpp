@@ -144,10 +144,11 @@ TEST(mouse_aim_tracker_velocity_and_switch) {
     tr.update(110.0f, 100.0f, 0, 100000);
     CHECK_EQ(tr.state().vx, 40.0f);
     CHECK_EQ(tr.state().vy, 0.0f);
-    // 预测 0.5s（EMA 速度 40）
+    // 预测 0.5s（EMA 速度 40）：位置经 OneEuro 平滑后为 107.45（100+0.745×10），
+    // 预测 = 平滑位置 + 40×0.5 = 127.45（速度估计仍用原始帧差，见 AimTracker.cpp）
     float px = 0, py = 0;
     tr.predict(0.5f, &px, &py);
-    CHECK_EQ(px, 130.0f);  // 110 + 40*0.5 = 130
+    CHECK(std::abs(px - 127.45f) < 0.1f);  // 107.45 + 40*0.5 = 127.45
     // 目标切换（target_id 变化）→ 速度清零
     tr.update(200.0f, 200.0f, 1, 200000);
     CHECK_EQ(tr.state().vx, 0.0f);
@@ -155,6 +156,40 @@ TEST(mouse_aim_tracker_velocity_and_switch) {
     // reset
     tr.reset();
     CHECK(!tr.state().valid);
+}
+
+// ---------------------------------------------------------------------------
+// 4b. AimTracker 位置平滑（OneEuro）：检测框噪声抑制
+// 真实场景：人体框上边缘 y1 帧间跳变 ±18px（模型头顶边界不确定），
+// 平滑后逐帧 step 应显著下降（否则 PID 输入噪声 → 鼠标抖动）。
+// ---------------------------------------------------------------------------
+TEST(mouse_aim_tracker_position_smoothing) {
+    aim::AimTracker tr;
+    // 真实抓取 y1 序列（138fps，中心 715px 附近 ±18px 脉冲噪声）
+    const float ys[] = {723.7f, 715.4f, 712.1f, 716.0f, 714.6f, 719.3f, 717.9f,
+                        716.8f, 729.1f, 718.8f, 716.0f, 730.3f, 719.0f, 718.7f,
+                        727.3f, 712.7f, 718.3f, 714.0f, 723.6f, 719.4f, 717.1f,
+                        715.9f, 713.4f, 719.4f, 715.5f, 725.7f, 713.4f, 717.0f,
+                        716.2f, 716.9f};
+    const uint64_t dt_us = 1000000 / 138;  // 138fps 帧间隔
+    tr.update(1274.0f, ys[0], 2, 0);
+    float raw_max_step = 0.0f, smooth_max_step = 0.0f;
+    float prev_raw = ys[0], prev_smooth = tr.state().y;
+    for (size_t i = 1; i < sizeof(ys) / sizeof(ys[0]); ++i) {
+        tr.update(1274.0f, ys[i], 2, i * dt_us);
+        const float step = std::fabs(tr.state().y - prev_smooth);
+        if (step > smooth_max_step) smooth_max_step = step;
+        prev_smooth = tr.state().y;
+        const float raw_step = std::fabs(ys[i] - prev_raw);
+        if (raw_step > raw_max_step) raw_max_step = raw_step;
+        prev_raw = ys[i];
+    }
+    // 原始最大逐帧跳变（真实数据 18.2px）
+    CHECK(raw_max_step > 10.0f);
+    // 平滑后逐帧 step 应 < 原始最大 step 的 30%（实测 ≤3.5px）
+    CHECK(smooth_max_step < raw_max_step * 0.30f);
+    // 平滑位置不能发散出合理范围（仍在目标区域附近）
+    CHECK(std::fabs(tr.state().y - 717.0f) < 30.0f);
 }
 
 // ---------------------------------------------------------------------------
