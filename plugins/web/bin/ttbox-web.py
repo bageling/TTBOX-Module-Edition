@@ -2000,8 +2000,16 @@ def _calib_sample_center(n: int = 3):
 
 
 def _calib_apply_gain(calib: dict) -> tuple[bool, str]:
-    """标定结果换算 kp 写回 RuntimeProfile（与旧后端/C 桥同款 K_LOOP=1/7）。"""
-    K_LOOP = 0.142857
+    """标定结果写回 RuntimeProfile。
+
+    修复：标定测的是“每 count 对应多少 px”（gain），这是物理量：
+      - gain_x/gain_y_px_per_count 写回 mouse（压枪 recoil_px_per_count、
+        拟人化 response_px_per_count 都依赖它，之前未序列化导致标定结果白测）；
+      - personal_trajectory.response_px_per_count 联动 gain_y（同语义：px/count）；
+      - 不再改写 kp_x/kp_y。旧实现用旧后端 K_LOOP=1/7 反推 kp（25 → ≈0.26），
+        在 pid1 体系下输出被 smoothTerm 缩放到 deadzone 以下，自瞄直接瘫痪。
+        pid1 的自适应 kp_gain 已处理灵敏度差异，标定不应动 kp。
+    """
     try:
         gain_x = float(calib.get('mouse_gain_x_px_per_count') or 0)
         gain_y = float(calib.get('mouse_gain_y_px_per_count') or 0)
@@ -2011,12 +2019,12 @@ def _calib_apply_gain(calib: dict) -> tuple[bool, str]:
         if not prof:
             return False, '读取 RuntimeProfile 失败'
         mo = prof.setdefault('mouse', {})
-        sx = (float(mo.get('rate_x', 1) or 1) * float(mo.get('sensitivity', 1) or 1)
-              * float(mo.get('output_scale', 1) or 1))
-        sy = (float(mo.get('rate_y', 1) or 1) * float(mo.get('sensitivity', 1) or 1)
-              * float(mo.get('output_scale', 1) or 1))
-        mo['kp_x'] = round(K_LOOP / max(gain_x * sx, 1e-6), 4)
-        mo['kp_y'] = round(K_LOOP / max(gain_y * sy, 1e-6), 4)
+        mo['gain_x_px_per_count'] = round(gain_x, 4)
+        mo['gain_y_px_per_count'] = round(gain_y, 4)
+        # 拟人化抖动预算与压枪换算共用同一物理量：px/count 联动。
+        # 注意层级：personal_trajectory 是 mouse 的子对象（RuntimeProfile 序列化结构）。
+        pt = mo.setdefault('personal_trajectory', {})
+        pt['response_px_per_count'] = round(gain_y, 4)
         r = ipc_request('SET_CONFIG', {'profile': prof})
         return r.get('status') == 0, r.get('error', '配置已更新')
     except Exception as exc:

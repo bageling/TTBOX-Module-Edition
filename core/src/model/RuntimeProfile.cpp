@@ -375,6 +375,10 @@ JsonValue RuntimeProfile::to_json() const {
     m.set("calibrating", JsonValue::boolean(mouse.calibrating));
     m.set("calibration_bias_x", JsonValue::number(static_cast<double>(mouse.calibration_bias_x)));
     m.set("calibration_bias_y", JsonValue::number(static_cast<double>(mouse.calibration_bias_y)));
+    // 自动标定产物：游戏灵敏度（每 count 对应画面多少 px）。压枪（recoil_px_per_count）
+    // 与拟人化（response_px_per_count 同语义）都依赖此值，标定后必须落盘生效。
+    m.set("gain_x_px_per_count", JsonValue::number(static_cast<double>(mouse.gain_x_px_per_count)));
+    m.set("gain_y_px_per_count", JsonValue::number(static_cast<double>(mouse.gain_y_px_per_count)));
     m.set("block_physical_x", JsonValue::boolean(mouse.block_physical_x));
     m.set("block_physical_y", JsonValue::boolean(mouse.block_physical_y));
     JsonValue cos = JsonValue::array();
@@ -585,6 +589,8 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
         p.mouse.calibrating = obj_bool(*m, "calibrating", false);
         p.mouse.calibration_bias_x = static_cast<float>(obj_num(*m, "calibration_bias_x", 0.0));
         p.mouse.calibration_bias_y = static_cast<float>(obj_num(*m, "calibration_bias_y", 0.0));
+        p.mouse.gain_x_px_per_count = static_cast<float>(obj_num(*m, "gain_x_px_per_count", 0.65));
+        p.mouse.gain_y_px_per_count = static_cast<float>(obj_num(*m, "gain_y_px_per_count", 0.65));
         p.mouse.block_physical_x = obj_bool(*m, "block_physical_x", false);
         p.mouse.block_physical_y = obj_bool(*m, "block_physical_y", false);
         if (const JsonValue* co = m->find("class_offsets"); co && co->is_array()) {

@@ -354,6 +354,8 @@ TEST(mouse_runtime_profile_json_roundtrip) {
     p.mouse.deadzone_x = 1.0f;
     p.mouse.smooth = 0.2f;
     p.mouse.lost_grace_ms = 78.0f;
+    p.mouse.gain_x_px_per_count = 0.42f;   // 自动标定产物（px/count）必须落盘生效
+    p.mouse.gain_y_px_per_count = 0.71f;
     p.mouse.block_physical_x = true;
     p.mouse.aim_point.aim_offset_x = 12.0f;
     p.mouse.fov_mode = true;
@@ -379,6 +381,8 @@ TEST(mouse_runtime_profile_json_roundtrip) {
     CHECK(q.mouse.deadzone_x == 1.0f);
     CHECK(q.mouse.smooth == 0.2f);
     CHECK(q.mouse.lost_grace_ms == 78.0f);
+    CHECK(q.mouse.gain_x_px_per_count == 0.42f);
+    CHECK(q.mouse.gain_y_px_per_count == 0.71f);
     CHECK(q.mouse.block_physical_x);
     CHECK(q.mouse.aim_point.aim_offset_x == 12.0f);
     CHECK(q.mouse.fov_mode);
