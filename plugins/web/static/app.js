@@ -6024,7 +6024,12 @@ function renderRuntime(payload) {
     // 原实现只在"停止→运行"时重连，且 dataset.running 未在"运行→停止"时更新，
     // 导致服务重启后前端永远检测不到翻转 → 画框冻结不恢复。
     const stateChanged = wasRunning !== nowRunning;
-    if (preview.dataset.src !== src || stateChanged) {
+    // 预览流健康检测：后端 /api/state 的 preview.alive 标记流是否在出帧。
+    // 仅重启 web（Core 未重启、running 不翻转）时，MJPEG 代理连接已断但状态不变，
+    // 必须靠 alive=false 触发重建，否则画面/检测框冻结（卡框）。
+    const previewAlive = (payload.preview || {}).alive !== false;
+    const streamDead = nowRunning && !previewAlive;
+    if (preview.dataset.src !== src || stateChanged || streamDead) {
       preview.dataset.src = src;
       preview.dataset.running = nowRunning ? "1" : "0";
       const oldSrc = preview.src;
@@ -6037,6 +6042,18 @@ function renderRuntime(payload) {
         });
       }
     }
+    // onerror 兜底：MJPEG 流中断（服务重启/网络抖动/流被服务端关闭）时自动重建。
+    // 与上面轮询检测双保险：onerror 立即恢复，轮询兜住 onerror 不触发的半死连接。
+    preview.onerror = () => {
+      const now = Date.now();
+      if (now - (window.__previewRebuildAt || 0) < 2000) return; // 防抖
+      window.__previewRebuildAt = now;
+      const cur = preview.dataset.src;
+      if (cur) {
+        preview.src = "";
+        requestAnimationFrame(() => { preview.src = cur; });
+      }
+    };
     // 停止态隐藏画面，运行态显示
     preview.style.visibility = nowRunning ? "visible" : "hidden";
   }

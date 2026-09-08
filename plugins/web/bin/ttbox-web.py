@@ -800,6 +800,11 @@ def collect_yu_state() -> dict:
             'version': str(st.get('version', '2026.08.03.1')) or '2026.08.03.1',
             'config': config_yu,
             'auto_start': _auto_start_payload(),
+            # 预览流健康：前端据此在服务重启/断线后自动重建 MJPEG 连接（防卡框冻结）
+            'preview': {
+                'alive': (time.time() - _PREVIEW_MONITOR['last_frame_ts']) < 2.5,
+                'active_conns': _PREVIEW_MONITOR['active_conns'],
+            },
             'models': models,  # YU 同构：数组
             'selected_model_id': registry_active or active_model,
             'presets': sorted(Path(PRESETS_DIR).glob('*.json')) and
@@ -2141,22 +2146,28 @@ def _calib_worker() -> None:
                     return
                 injected_at = time.monotonic()
                 samples = []
-                for _ in range(20):
-                    time.sleep(0.05)
+                first_response_ms = None
+                for _ in range(60):
+                    time.sleep(0.008)
                     target = _calib_target()
                     if target is None:
                         continue
                     if target['target_id'] != base['target_id'] or target['class_id'] != base['class_id']:
                         continue
                     delta = (target['x'] - base['x']) if axis is CalibrationAxis.X else (target['y'] - base['y'])
+                    now_ms = (time.monotonic() - injected_at) * 1000.0
+                    if first_response_ms is None and abs(delta) >= 0.3:
+                        first_response_ms = now_ms
                     samples.append(CalibrationObservation(
                         axis=axis,
                         injected_count=float(amp),
                         measured_delta_px=abs(delta),
-                        response_delay_ms=(target['timestamp'] - injected_at) * 1000.0,
+                        response_delay_ms=first_response_ms if first_response_ms is not None else now_ms,
                         target_id=f"{target['target_id']}:{target['class_id']}",
                         valid=abs(delta) >= 0.3,
                     ))
+                    if len(samples) >= 20 and first_response_ms is not None:
+                        break
                 # 清除本轮偏置，避免下一轮叠加；仍保持标定模式直到 finally。
                 prof = _get_runtime_profile()
                 mo = prof.setdefault('mouse', {})
@@ -3705,6 +3716,11 @@ def preview():
     return Response(px, mimetype='image/jpeg')
 
 
+# 预览流健康监控：任何 MJPEG 连接收到帧数据即刷新 last_frame_ts。
+# 前端 /api/state 轮询依据 preview.alive 判断预览流是否存活（服务重启/断线时自动重建连接）。
+_PREVIEW_MONITOR = {"last_frame_ts": 0.0, "active_conns": 0}
+
+
 @app.get('/api/preview.mjpg')
 def preview_stream():
     preview_url = os.environ.get('TTBOX_PREVIEW_URL', '').rstrip('/')
@@ -3717,34 +3733,40 @@ def preview_stream():
         upstream_port = parsed.port or 8001
 
         def proxy_stream():
-            while True:
-                try:
-                    upstream = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    upstream.settimeout(5)
-                    upstream.connect((upstream_host, upstream_port))
-                    req_line = 'GET /api/preview.mjpg HTTP/1.1\r\nHost: {}:{}\r\n\r\n'.format(upstream_host, upstream_port)
-                    upstream.sendall(req_line.encode())
-                    # 剥掉上游 HTTP 响应头（读到第一个 CRLFCRLF），只透传 multipart body，
-                    # 否则浏览器会在 multipart 流里收到嵌套的 HTTP 头而无法解析。
-                    buf = b''
-                    while b'\r\n\r\n' not in buf:
-                        chunk = upstream.recv(4096)
-                        if not chunk:
-                            break
-                        buf += chunk
-                    if b'\r\n\r\n' in buf:
-                        body = buf.split(b'\r\n\r\n', 1)[1]
-                        if body:
-                            yield body
-                    # 后续字节是纯 multipart 流，直接透传
-                    while True:
-                        chunk = upstream.recv(65536)
-                        if not chunk:
-                            break
-                        yield chunk
-                except (OSError, ConnectionResetError):
-                    pass
-                time.sleep(0.5)  # 断线重连间隔
+            _PREVIEW_MONITOR["active_conns"] += 1
+            try:
+                while True:
+                    try:
+                        upstream = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        upstream.settimeout(5)
+                        upstream.connect((upstream_host, upstream_port))
+                        req_line = 'GET /api/preview.mjpg HTTP/1.1\r\nHost: {}:{}\r\n\r\n'.format(upstream_host, upstream_port)
+                        upstream.sendall(req_line.encode())
+                        # 剥掉上游 HTTP 响应头（读到第一个 CRLFCRLF），只透传 multipart body，
+                        # 否则浏览器会在 multipart 流里收到嵌套的 HTTP 头而无法解析。
+                        buf = b''
+                        while b'\r\n\r\n' not in buf:
+                            chunk = upstream.recv(4096)
+                            if not chunk:
+                                break
+                            buf += chunk
+                        if b'\r\n\r\n' in buf:
+                            body = buf.split(b'\r\n\r\n', 1)[1]
+                            if body:
+                                _PREVIEW_MONITOR["last_frame_ts"] = time.time()
+                                yield body
+                        # 后续字节是纯 multipart 流，直接透传
+                        while True:
+                            chunk = upstream.recv(65536)
+                            if not chunk:
+                                break
+                            _PREVIEW_MONITOR["last_frame_ts"] = time.time()
+                            yield chunk
+                    except (OSError, ConnectionResetError):
+                        pass
+                    time.sleep(0.5)  # 断线重连间隔
+            finally:
+                _PREVIEW_MONITOR["active_conns"] -= 1
 
         return Response(
             proxy_stream(),
@@ -3783,7 +3805,10 @@ def main():
     print(f'  模板目录: {TEMPLATE_DIR}')
     print(f'  静态目录: {STATIC_DIR}')
     print(f'  IPC Socket: {IPC_SOCKET}')
-    serve(app, host=LISTEN_HOST, port=LISTEN_PORT)
+    # waitress 默认 4 线程会被 MJPEG 长连接占满（每个预览流永久占 1 线程），
+    # 导致 API 请求排队（queue depth 警告）、预览流卡顿（画面/检测框卡住）、
+    # 配置保存无响应。threads=16 保证预览流与 API 互不饿死。
+    serve(app, host=LISTEN_HOST, port=LISTEN_PORT, threads=16)
 
 
 if __name__ == '__main__':
