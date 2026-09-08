@@ -43,6 +43,10 @@ bool CoreRuntime::initialize(const Params& p, std::string* error) {
 
 bool CoreRuntime::start(std::string* error) {
     if (!capture_ || !workers_ || !mailbox_ || running_.exchange(true)) return false;
+    // 重启（停止→启动）时清空 mailbox 残留任务：V4L2 sequence 重新从 0 计数，
+    // 不清空会导致 AimThread last_frame 被旧任务抬高，新帧全被 take_latest 去重丢弃
+    // （重启后 1~3 分钟检测框不更新，直到帧号重新涨回旧值）。
+    mailbox_->clear();
     start_steady_ms_.store(steady_now_ms());
     if (!capture_->open(error) || !capture_->start(error)) {
         running_ = false;

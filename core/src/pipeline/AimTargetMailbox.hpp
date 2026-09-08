@@ -34,6 +34,16 @@ public:
         *out = *best;
         return true;
     }
+    // 清空所有槽位。CoreRuntime 重启（停止→启动）时 V4L2 sequence 从 0 重新计数，
+    // 若不清除上一周期的残留任务，AimThread 的 last_frame 会被旧任务抬到旧帧号，
+    // 新周期所有任务（frame_number 从 0 重新递增）都会被 take_latest 去重丢弃，
+    // 表现为重启后 1~3 分钟检测框不更新（直到帧号重新涨回旧值）。
+    void clear() {
+        for (std::size_t i = 0; i < worker_count_; ++i) {
+            std::atomic_store_explicit(&slots_[i], std::shared_ptr<const AimTargetTask>{},
+                                       std::memory_order_release);
+        }
+    }
 private:
     std::array<std::shared_ptr<const AimTargetTask>, kMaxWorkers> slots_{};
     std::size_t worker_count_;
