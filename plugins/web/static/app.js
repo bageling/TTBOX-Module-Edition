@@ -73,8 +73,6 @@ const NUMERIC_RANGE_LIMITS = {
   capture_crop_offset_y: [CAPTURE_CROP_OFFSET_MIN, CAPTURE_CROP_OFFSET_MAX],
   controller_kp_x: [0, 100],
   controller_kp_y: [0, 100],
-  controller_ki_x: [0, 50],
-  controller_ki_y: [0, 50],
   controller_kd_x: [0, 30],
   controller_kd_y: [0, 30],
   controller_predict_x: [0, 3],
@@ -85,15 +83,27 @@ const NUMERIC_RANGE_LIMITS = {
   controller_pull_curve_strength: [0, 2],
   controller_pull_curve_jitter_px: [0, 12],
   controller_pull_curve_min_distance: [0, 1280],
-  controller_continuous_lead_enter_distance: [0, 1280],
-  controller_continuous_lead_scale: [0, 1],
-  controller_continuous_lead_fade_in_ms: [0, 1000],
-  controller_continuous_lead_fade_out_ms: [0, 1000],
-  controller_continuous_lead_near_disable_ratio: [0, 1],
   controller_aim_reference_offset_x: [-AIM_REFERENCE_OFFSET_MAX, AIM_REFERENCE_OFFSET_MAX],
   controller_aim_reference_offset_y: [-AIM_REFERENCE_OFFSET_MAX, AIM_REFERENCE_OFFSET_MAX],
   controller_selector_lost_grace_ms: [0, 1000],
-  controller_y_axis_fire_release_delay_sec: [0, 2],
+  // ---- 拟人化整形（第1项）----
+  controller_personal_trajectory_speed_scale: [0, 2],
+  controller_personal_trajectory_stability_scale: [0, 2],
+  controller_personal_trajectory_variation_scale: [0, 2],
+  controller_personal_trajectory_jitter_amp_px: [0, 2],
+  controller_personal_trajectory_fitts_intercept_ms: [50, 300],
+  controller_personal_trajectory_fitts_slope_ms_per_bit: [0, 300],
+  // ---- 目标锁定确认（第2项）----
+  controller_lock_confirm_confirmation_frames: [1, 30],
+  controller_lock_confirm_enter_conf: [0, 1],
+  controller_lock_confirm_hold_conf: [0, 1],
+  controller_lock_confirm_instant_enter_dist: [0, 640],
+  controller_lock_confirm_instant_enter_conf: [0, 1],
+  // ---- 头部瞄准约束（第3项）----
+  controller_head_aim_head_offset_top_fraction: [0, 1],
+  controller_head_aim_head_height_fraction: [0, 1],
+  controller_head_aim_safe_inset_fraction: [0, 0.45],
+  controller_head_aim_max_lag_px: [0, 10],
   autoCalibrationGainX: [0.03, 8],
   autoCalibrationGainY: [0.03, 8],
   autoCalibrationDelay: [0, 50],
@@ -151,20 +161,30 @@ const CONTROLLER_DEFAULTS = {
   pull_curve_strength: 0.8,
   pull_curve_jitter_px: 3,
   pull_curve_min_distance: 80,
-  continuous_lead_enabled: false,
-  continuous_lead_enter_distance: 150,
-  continuous_lead_scale: 0.5,
-  continuous_lead_fade_in_ms: 300,
-  continuous_lead_fade_out_ms: 300,
-  continuous_lead_near_disable_ratio: 0.66,
-  block_physical_mouse_x_while_aiming: false,
-  block_physical_mouse_y_while_aiming: false,
-  aim_fire_lock_y: false,
   aim_reference_offset_x: 0,
   aim_reference_offset_y: 0,
-  y_axis_fire_hotkey: "left",
-  y_axis_fire_release_delay_sec: 0.3,
   selector_lost_grace_ms: 30,
+  // ---- 拟人化整形（第1项，默认关）----
+  personal_trajectory_enabled: false,
+  personal_trajectory_speed_scale: 1,
+  personal_trajectory_stability_scale: 1,
+  personal_trajectory_variation_scale: 1,
+  personal_trajectory_jitter_amp_px: 0.2,
+  personal_trajectory_fitts_intercept_ms: 120,
+  personal_trajectory_fitts_slope_ms_per_bit: 85,
+  // ---- 目标锁定确认（第2项，默认=旧行为）----
+  lock_confirm_confirmation_frames: 1,
+  lock_confirm_enter_conf: 0,
+  lock_confirm_hold_conf: 0,
+  lock_confirm_instant_enter_enabled: true,
+  lock_confirm_instant_enter_dist: 105,
+  lock_confirm_instant_enter_conf: 0.5,
+  // ---- 头部瞄准约束（第3项，默认关）----
+  head_aim_enabled: false,
+  head_aim_head_offset_top_fraction: 0.04,
+  head_aim_head_height_fraction: 0.28,
+  head_aim_safe_inset_fraction: 0.12,
+  head_aim_max_lag_px: 1.25,
 };
 const MOVEMENT_CONTROL_DEFAULTS = {
   sens: 1,
@@ -5339,8 +5359,6 @@ function populateForm(config) {
 
   setValue("controller_kp_x", controller.kp_x ?? CONTROLLER_DEFAULTS.kp_x);
   setValue("controller_kp_y", controller.kp_y ?? CONTROLLER_DEFAULTS.kp_y);
-  setValue("controller_ki_x", controller.ki_x ?? CONTROLLER_DEFAULTS.ki_x);
-  setValue("controller_ki_y", controller.ki_y ?? CONTROLLER_DEFAULTS.ki_y);
   setValue("controller_kd_x", controller.kd_x ?? CONTROLLER_DEFAULTS.kd_x);
   setValue("controller_kd_y", controller.kd_y ?? CONTROLLER_DEFAULTS.kd_y);
   setValue("controller_predict_x", controller.predict_x ?? CONTROLLER_DEFAULTS.predict_x);
@@ -5352,30 +5370,31 @@ function populateForm(config) {
   setValue("controller_pull_curve_strength", controller.pull_curve_strength ?? CONTROLLER_DEFAULTS.pull_curve_strength);
   setValue("controller_pull_curve_jitter_px", controller.pull_curve_jitter_px ?? CONTROLLER_DEFAULTS.pull_curve_jitter_px);
   setValue("controller_pull_curve_min_distance", controller.pull_curve_min_distance ?? CONTROLLER_DEFAULTS.pull_curve_min_distance);
-  setCheckbox("controller_continuous_lead_enabled", controller.continuous_lead_enabled ?? CONTROLLER_DEFAULTS.continuous_lead_enabled);
-  setValue("controller_continuous_lead_enter_distance", controller.continuous_lead_enter_distance ?? CONTROLLER_DEFAULTS.continuous_lead_enter_distance);
-  setValue("controller_continuous_lead_scale", controller.continuous_lead_scale ?? CONTROLLER_DEFAULTS.continuous_lead_scale);
-  setValue("controller_continuous_lead_fade_in_ms", controller.continuous_lead_fade_in_ms ?? CONTROLLER_DEFAULTS.continuous_lead_fade_in_ms);
-  setValue("controller_continuous_lead_fade_out_ms", controller.continuous_lead_fade_out_ms ?? CONTROLLER_DEFAULTS.continuous_lead_fade_out_ms);
-  setValue(
-    "controller_continuous_lead_near_disable_ratio",
-    controller.continuous_lead_near_disable_ratio ?? CONTROLLER_DEFAULTS.continuous_lead_near_disable_ratio
-  );
-  setCheckbox(
-    "controller_block_physical_mouse_x_while_aiming",
-    controller.block_physical_mouse_x_while_aiming ?? CONTROLLER_DEFAULTS.block_physical_mouse_x_while_aiming
-  );
-  setCheckbox(
-    "controller_block_physical_mouse_y_while_aiming",
-    controller.block_physical_mouse_y_while_aiming ?? CONTROLLER_DEFAULTS.block_physical_mouse_y_while_aiming
-  );
-  setCheckbox("controller_aim_fire_lock_y", controller.aim_fire_lock_y ?? CONTROLLER_DEFAULTS.aim_fire_lock_y);
   setValue("controller_aim_reference_offset_x", controller.aim_reference_offset_x ?? CONTROLLER_DEFAULTS.aim_reference_offset_x);
   setValue("controller_aim_reference_offset_y", controller.aim_reference_offset_y ?? CONTROLLER_DEFAULTS.aim_reference_offset_y);
   updateDynamicOffsetControlLimits({ clampValues: true });
   setValue("controller_selector_lost_grace_ms", controller.selector_lost_grace_ms ?? CONTROLLER_DEFAULTS.selector_lost_grace_ms);
-  setValue("controller_y_axis_fire_hotkey", controller.y_axis_fire_hotkey ?? CONTROLLER_DEFAULTS.y_axis_fire_hotkey);
-  setValue("controller_y_axis_fire_release_delay_sec", controller.y_axis_fire_release_delay_sec ?? CONTROLLER_DEFAULTS.y_axis_fire_release_delay_sec);
+  // ---- 拟人化整形（第1项）----
+  setCheckbox("controller_personal_trajectory_enabled", controller.personal_trajectory_enabled ?? CONTROLLER_DEFAULTS.personal_trajectory_enabled);
+  setValue("controller_personal_trajectory_speed_scale", controller.personal_trajectory_speed_scale ?? CONTROLLER_DEFAULTS.personal_trajectory_speed_scale);
+  setValue("controller_personal_trajectory_stability_scale", controller.personal_trajectory_stability_scale ?? CONTROLLER_DEFAULTS.personal_trajectory_stability_scale);
+  setValue("controller_personal_trajectory_variation_scale", controller.personal_trajectory_variation_scale ?? CONTROLLER_DEFAULTS.personal_trajectory_variation_scale);
+  setValue("controller_personal_trajectory_jitter_amp_px", controller.personal_trajectory_jitter_amp_px ?? CONTROLLER_DEFAULTS.personal_trajectory_jitter_amp_px);
+  setValue("controller_personal_trajectory_fitts_intercept_ms", controller.personal_trajectory_fitts_intercept_ms ?? CONTROLLER_DEFAULTS.personal_trajectory_fitts_intercept_ms);
+  setValue("controller_personal_trajectory_fitts_slope_ms_per_bit", controller.personal_trajectory_fitts_slope_ms_per_bit ?? CONTROLLER_DEFAULTS.personal_trajectory_fitts_slope_ms_per_bit);
+  // ---- 目标锁定确认（第2项）----
+  setValue("controller_lock_confirm_confirmation_frames", controller.lock_confirm_confirmation_frames ?? CONTROLLER_DEFAULTS.lock_confirm_confirmation_frames);
+  setValue("controller_lock_confirm_enter_conf", controller.lock_confirm_enter_conf ?? CONTROLLER_DEFAULTS.lock_confirm_enter_conf);
+  setValue("controller_lock_confirm_hold_conf", controller.lock_confirm_hold_conf ?? CONTROLLER_DEFAULTS.lock_confirm_hold_conf);
+  setCheckbox("controller_lock_confirm_instant_enter_enabled", controller.lock_confirm_instant_enter_enabled ?? CONTROLLER_DEFAULTS.lock_confirm_instant_enter_enabled);
+  setValue("controller_lock_confirm_instant_enter_dist", controller.lock_confirm_instant_enter_dist ?? CONTROLLER_DEFAULTS.lock_confirm_instant_enter_dist);
+  setValue("controller_lock_confirm_instant_enter_conf", controller.lock_confirm_instant_enter_conf ?? CONTROLLER_DEFAULTS.lock_confirm_instant_enter_conf);
+  // ---- 头部瞄准约束（第3项）----
+  setCheckbox("controller_head_aim_enabled", controller.head_aim_enabled ?? CONTROLLER_DEFAULTS.head_aim_enabled);
+  setValue("controller_head_aim_head_offset_top_fraction", controller.head_aim_head_offset_top_fraction ?? CONTROLLER_DEFAULTS.head_aim_head_offset_top_fraction);
+  setValue("controller_head_aim_head_height_fraction", controller.head_aim_head_height_fraction ?? CONTROLLER_DEFAULTS.head_aim_head_height_fraction);
+  setValue("controller_head_aim_safe_inset_fraction", controller.head_aim_safe_inset_fraction ?? CONTROLLER_DEFAULTS.head_aim_safe_inset_fraction);
+  setValue("controller_head_aim_max_lag_px", controller.head_aim_max_lag_px ?? CONTROLLER_DEFAULTS.head_aim_max_lag_px);
 
   setCheckbox("recoil_enabled", recoil.enabled ?? RECOIL_DEFAULTS.enabled);
   setCheckbox("recoil_only_when_target_visible", recoil.only_when_target_visible ?? RECOIL_DEFAULTS.only_when_target_visible);
@@ -5426,8 +5445,6 @@ function setMovementControlDefaultsToForm() {
   setRadioValue("mouse_output_mode", MOVEMENT_CONTROL_DEFAULTS.mouse_output_mode);
   setValue("controller_kp_x", controller.kp_x);
   setValue("controller_kp_y", controller.kp_y);
-  setValue("controller_ki_x", controller.ki_x);
-  setValue("controller_ki_y", controller.ki_y);
   setValue("controller_kd_x", controller.kd_x);
   setValue("controller_kd_y", controller.kd_y);
   setValue("controller_predict_x", controller.predict_x);
@@ -5439,18 +5456,28 @@ function setMovementControlDefaultsToForm() {
   setValue("controller_pull_curve_strength", controller.pull_curve_strength);
   setValue("controller_pull_curve_jitter_px", controller.pull_curve_jitter_px);
   setValue("controller_pull_curve_min_distance", controller.pull_curve_min_distance);
-  setCheckbox("controller_continuous_lead_enabled", controller.continuous_lead_enabled);
-  setValue("controller_continuous_lead_enter_distance", controller.continuous_lead_enter_distance);
-  setValue("controller_continuous_lead_scale", controller.continuous_lead_scale);
-  setValue("controller_continuous_lead_fade_in_ms", controller.continuous_lead_fade_in_ms);
-  setValue("controller_continuous_lead_fade_out_ms", controller.continuous_lead_fade_out_ms);
-  setValue("controller_continuous_lead_near_disable_ratio", controller.continuous_lead_near_disable_ratio);
-  setCheckbox("controller_block_physical_mouse_x_while_aiming", controller.block_physical_mouse_x_while_aiming);
-  setCheckbox("controller_block_physical_mouse_y_while_aiming", controller.block_physical_mouse_y_while_aiming);
-  setCheckbox("controller_aim_fire_lock_y", controller.aim_fire_lock_y);
   setValue("controller_selector_lost_grace_ms", controller.selector_lost_grace_ms);
-  setValue("controller_y_axis_fire_hotkey", controller.y_axis_fire_hotkey);
-  setValue("controller_y_axis_fire_release_delay_sec", controller.y_axis_fire_release_delay_sec);
+  // ---- 拟人化整形（第1项）----
+  setCheckbox("controller_personal_trajectory_enabled", controller.personal_trajectory_enabled);
+  setValue("controller_personal_trajectory_speed_scale", controller.personal_trajectory_speed_scale);
+  setValue("controller_personal_trajectory_stability_scale", controller.personal_trajectory_stability_scale);
+  setValue("controller_personal_trajectory_variation_scale", controller.personal_trajectory_variation_scale);
+  setValue("controller_personal_trajectory_jitter_amp_px", controller.personal_trajectory_jitter_amp_px);
+  setValue("controller_personal_trajectory_fitts_intercept_ms", controller.personal_trajectory_fitts_intercept_ms);
+  setValue("controller_personal_trajectory_fitts_slope_ms_per_bit", controller.personal_trajectory_fitts_slope_ms_per_bit);
+  // ---- 目标锁定确认（第2项）----
+  setValue("controller_lock_confirm_confirmation_frames", controller.lock_confirm_confirmation_frames);
+  setValue("controller_lock_confirm_enter_conf", controller.lock_confirm_enter_conf);
+  setValue("controller_lock_confirm_hold_conf", controller.lock_confirm_hold_conf);
+  setCheckbox("controller_lock_confirm_instant_enter_enabled", controller.lock_confirm_instant_enter_enabled);
+  setValue("controller_lock_confirm_instant_enter_dist", controller.lock_confirm_instant_enter_dist);
+  setValue("controller_lock_confirm_instant_enter_conf", controller.lock_confirm_instant_enter_conf);
+  // ---- 头部瞄准约束（第3项）----
+  setCheckbox("controller_head_aim_enabled", controller.head_aim_enabled);
+  setValue("controller_head_aim_head_offset_top_fraction", controller.head_aim_head_offset_top_fraction);
+  setValue("controller_head_aim_head_height_fraction", controller.head_aim_head_height_fraction);
+  setValue("controller_head_aim_safe_inset_fraction", controller.head_aim_safe_inset_fraction);
+  setValue("controller_head_aim_max_lag_px", controller.head_aim_max_lag_px);
 }
 
 function syncRangeFieldsForIds(ids) {
@@ -5510,8 +5537,6 @@ function movementDefaultsForSection(sectionId) {
       mouse_output_mode: MOVEMENT_CONTROL_DEFAULTS.mouse_output_mode,
       controller_kp_x: controller.kp_x,
       controller_kp_y: controller.kp_y,
-      controller_ki_x: controller.ki_x,
-      controller_ki_y: controller.ki_y,
       controller_kd_x: controller.kd_x,
       controller_kd_y: controller.kd_y,
       controller_predict_x: controller.predict_x,
@@ -5520,9 +5545,6 @@ function movementDefaultsForSection(sectionId) {
       controller_rate_y: controller.rate_y,
       controller_output_deadzone: controller.output_deadzone,
       controller_selector_lost_grace_ms: controller.selector_lost_grace_ms,
-      controller_aim_fire_lock_y: controller.aim_fire_lock_y,
-      controller_y_axis_fire_hotkey: controller.y_axis_fire_hotkey,
-      controller_y_axis_fire_release_delay_sec: controller.y_axis_fire_release_delay_sec,
     },
     "control-section-pull-curve": {
       controller_pull_curve_enabled: controller.pull_curve_enabled,
@@ -5530,17 +5552,29 @@ function movementDefaultsForSection(sectionId) {
       controller_pull_curve_jitter_px: controller.pull_curve_jitter_px,
       controller_pull_curve_min_distance: controller.pull_curve_min_distance,
     },
-    "control-section-continuous-lead": {
-      controller_continuous_lead_enabled: controller.continuous_lead_enabled,
-      controller_continuous_lead_enter_distance: controller.continuous_lead_enter_distance,
-      controller_continuous_lead_scale: controller.continuous_lead_scale,
-      controller_continuous_lead_fade_in_ms: controller.continuous_lead_fade_in_ms,
-      controller_continuous_lead_fade_out_ms: controller.continuous_lead_fade_out_ms,
-      controller_continuous_lead_near_disable_ratio: controller.continuous_lead_near_disable_ratio,
+    "control-section-personal-trajectory": {
+      controller_personal_trajectory_enabled: controller.personal_trajectory_enabled,
+      controller_personal_trajectory_speed_scale: controller.personal_trajectory_speed_scale,
+      controller_personal_trajectory_stability_scale: controller.personal_trajectory_stability_scale,
+      controller_personal_trajectory_variation_scale: controller.personal_trajectory_variation_scale,
+      controller_personal_trajectory_jitter_amp_px: controller.personal_trajectory_jitter_amp_px,
+      controller_personal_trajectory_fitts_intercept_ms: controller.personal_trajectory_fitts_intercept_ms,
+      controller_personal_trajectory_fitts_slope_ms_per_bit: controller.personal_trajectory_fitts_slope_ms_per_bit,
     },
-    "control-section-physical-motion-block": {
-      controller_block_physical_mouse_x_while_aiming: controller.block_physical_mouse_x_while_aiming,
-      controller_block_physical_mouse_y_while_aiming: controller.block_physical_mouse_y_while_aiming,
+    "control-section-lock-confirm": {
+      controller_lock_confirm_confirmation_frames: controller.lock_confirm_confirmation_frames,
+      controller_lock_confirm_enter_conf: controller.lock_confirm_enter_conf,
+      controller_lock_confirm_hold_conf: controller.lock_confirm_hold_conf,
+      controller_lock_confirm_instant_enter_enabled: controller.lock_confirm_instant_enter_enabled,
+      controller_lock_confirm_instant_enter_dist: controller.lock_confirm_instant_enter_dist,
+      controller_lock_confirm_instant_enter_conf: controller.lock_confirm_instant_enter_conf,
+    },
+    "control-section-head-aim": {
+      controller_head_aim_enabled: controller.head_aim_enabled,
+      controller_head_aim_head_offset_top_fraction: controller.head_aim_head_offset_top_fraction,
+      controller_head_aim_head_height_fraction: controller.head_aim_head_height_fraction,
+      controller_head_aim_safe_inset_fraction: controller.head_aim_safe_inset_fraction,
+      controller_head_aim_max_lag_px: controller.head_aim_max_lag_px,
     },
   };
   return defaultsBySection[sectionId] || defaultsBySection["control-section-pid"];
@@ -5712,8 +5746,6 @@ function collectConfig() {
       controller: {
         kp_x: getNumber("controller_kp_x", CONTROLLER_DEFAULTS.kp_x),
         kp_y: getNumber("controller_kp_y", CONTROLLER_DEFAULTS.kp_y),
-        ki_x: getNumber("controller_ki_x", CONTROLLER_DEFAULTS.ki_x),
-        ki_y: getNumber("controller_ki_y", CONTROLLER_DEFAULTS.ki_y),
         kd_x: getNumber("controller_kd_x", CONTROLLER_DEFAULTS.kd_x),
         kd_y: getNumber("controller_kd_y", CONTROLLER_DEFAULTS.kd_y),
         predict_x: getNumber("controller_predict_x", CONTROLLER_DEFAULTS.predict_x),
@@ -5727,23 +5759,30 @@ function collectConfig() {
         pull_curve_strength: getNumber("controller_pull_curve_strength", CONTROLLER_DEFAULTS.pull_curve_strength),
         pull_curve_jitter_px: getNumber("controller_pull_curve_jitter_px", CONTROLLER_DEFAULTS.pull_curve_jitter_px),
         pull_curve_min_distance: getNumber("controller_pull_curve_min_distance", CONTROLLER_DEFAULTS.pull_curve_min_distance),
-        continuous_lead_enabled: getCheckbox("controller_continuous_lead_enabled"),
-        continuous_lead_enter_distance: getNumber("controller_continuous_lead_enter_distance", CONTROLLER_DEFAULTS.continuous_lead_enter_distance),
-        continuous_lead_scale: getNumber("controller_continuous_lead_scale", CONTROLLER_DEFAULTS.continuous_lead_scale),
-        continuous_lead_fade_in_ms: getNumber("controller_continuous_lead_fade_in_ms", CONTROLLER_DEFAULTS.continuous_lead_fade_in_ms),
-        continuous_lead_fade_out_ms: getNumber("controller_continuous_lead_fade_out_ms", CONTROLLER_DEFAULTS.continuous_lead_fade_out_ms),
-        continuous_lead_near_disable_ratio: getNumber(
-          "controller_continuous_lead_near_disable_ratio",
-          CONTROLLER_DEFAULTS.continuous_lead_near_disable_ratio
-        ),
-        block_physical_mouse_x_while_aiming: getCheckbox("controller_block_physical_mouse_x_while_aiming"),
-        block_physical_mouse_y_while_aiming: getCheckbox("controller_block_physical_mouse_y_while_aiming"),
-        aim_fire_lock_y: getCheckbox("controller_aim_fire_lock_y"),
         aim_reference_offset_x: getNumberInRange("controller_aim_reference_offset_x", CONTROLLER_DEFAULTS.aim_reference_offset_x),
         aim_reference_offset_y: getNumberInRange("controller_aim_reference_offset_y", CONTROLLER_DEFAULTS.aim_reference_offset_y),
-        y_axis_fire_hotkey: getString("controller_y_axis_fire_hotkey") || CONTROLLER_DEFAULTS.y_axis_fire_hotkey,
-        y_axis_fire_release_delay_sec: getNumber("controller_y_axis_fire_release_delay_sec", CONTROLLER_DEFAULTS.y_axis_fire_release_delay_sec),
         selector_lost_grace_ms: getNumber("controller_selector_lost_grace_ms", CONTROLLER_DEFAULTS.selector_lost_grace_ms),
+        // ---- 拟人化整形（第1项，默认关）----
+        personal_trajectory_enabled: getCheckbox("controller_personal_trajectory_enabled"),
+        personal_trajectory_speed_scale: getNumber("controller_personal_trajectory_speed_scale", CONTROLLER_DEFAULTS.personal_trajectory_speed_scale),
+        personal_trajectory_stability_scale: getNumber("controller_personal_trajectory_stability_scale", CONTROLLER_DEFAULTS.personal_trajectory_stability_scale),
+        personal_trajectory_variation_scale: getNumber("controller_personal_trajectory_variation_scale", CONTROLLER_DEFAULTS.personal_trajectory_variation_scale),
+        personal_trajectory_jitter_amp_px: getNumber("controller_personal_trajectory_jitter_amp_px", CONTROLLER_DEFAULTS.personal_trajectory_jitter_amp_px),
+        personal_trajectory_fitts_intercept_ms: getNumber("controller_personal_trajectory_fitts_intercept_ms", CONTROLLER_DEFAULTS.personal_trajectory_fitts_intercept_ms),
+        personal_trajectory_fitts_slope_ms_per_bit: getNumber("controller_personal_trajectory_fitts_slope_ms_per_bit", CONTROLLER_DEFAULTS.personal_trajectory_fitts_slope_ms_per_bit),
+        // ---- 目标锁定确认（第2项）----
+        lock_confirm_confirmation_frames: getNumber("controller_lock_confirm_confirmation_frames", CONTROLLER_DEFAULTS.lock_confirm_confirmation_frames),
+        lock_confirm_enter_conf: getNumber("controller_lock_confirm_enter_conf", CONTROLLER_DEFAULTS.lock_confirm_enter_conf),
+        lock_confirm_hold_conf: getNumber("controller_lock_confirm_hold_conf", CONTROLLER_DEFAULTS.lock_confirm_hold_conf),
+        lock_confirm_instant_enter_enabled: getCheckbox("controller_lock_confirm_instant_enter_enabled"),
+        lock_confirm_instant_enter_dist: getNumber("controller_lock_confirm_instant_enter_dist", CONTROLLER_DEFAULTS.lock_confirm_instant_enter_dist),
+        lock_confirm_instant_enter_conf: getNumber("controller_lock_confirm_instant_enter_conf", CONTROLLER_DEFAULTS.lock_confirm_instant_enter_conf),
+        // ---- 头部瞄准约束（第3项，默认关）----
+        head_aim_enabled: getCheckbox("controller_head_aim_enabled"),
+        head_aim_head_offset_top_fraction: getNumber("controller_head_aim_head_offset_top_fraction", CONTROLLER_DEFAULTS.head_aim_head_offset_top_fraction),
+        head_aim_head_height_fraction: getNumber("controller_head_aim_head_height_fraction", CONTROLLER_DEFAULTS.head_aim_head_height_fraction),
+        head_aim_safe_inset_fraction: getNumber("controller_head_aim_safe_inset_fraction", CONTROLLER_DEFAULTS.head_aim_safe_inset_fraction),
+        head_aim_max_lag_px: getNumber("controller_head_aim_max_lag_px", CONTROLLER_DEFAULTS.head_aim_max_lag_px),
       },
     },
     recoil: {

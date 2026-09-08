@@ -388,7 +388,6 @@ def _bits_to_hotkey(v):
 # controller 内的数值/布尔直通字段（YU key → mouse key）
 CONTROLLER_NUMS = {
     'kp_x': 'kp_x', 'kp_y': 'kp_y',
-    'ki_x': 'ki_x', 'ki_y': 'ki_y',
     'kd_x': 'kd_x', 'kd_y': 'kd_y',
     'predict_x': 'predict_x', 'predict_y': 'predict_y',
     'rate_x': 'rate_x', 'rate_y': 'rate_y',
@@ -397,16 +396,14 @@ CONTROLLER_NUMS = {
     'selector_lost_grace_ms': 'lost_grace_ms',
     'aim_reference_offset_x': 'aim_offset_x',
     'aim_reference_offset_y': 'aim_offset_y',
-    'y_axis_fire_release_delay_sec': 'y_axis_fire_release_delay_sec',
 }
 # controller 内的布尔直通字段
 CONTROLLER_BOOLS = {
-    'aim_fire_lock_y': 'aim_fire_lock_y',
-    'block_physical_mouse_x_while_aiming': 'block_physical_x',
-    'block_physical_mouse_y_while_aiming': 'block_physical_y',
-    'continuous_lead_enabled': '_cl_enabled',
     'pull_curve_enabled': '_pc_enabled',
     'humanize_enabled': '_hz_enabled',
+    'personal_trajectory_enabled': '_pt_enabled',
+    'lock_confirm_instant_enter_enabled': '_lc_inst_enter_enabled',
+    'head_aim_enabled': '_ha_enabled',
 }
 
 
@@ -424,11 +421,8 @@ def yu_body_to_profile(body: dict) -> dict:
             if tk.startswith('_'):
                 continue  # 嵌套结构开关，下面统一处理
             mouse[tk] = bool(ctrl[yk])
-    # 热键：字符串 → 位掩码
-    if ctrl.get('y_axis_fire_hotkey') is not None:
-        mouse['y_axis_fire_hotkey'] = _hotkey_to_bits(ctrl['y_axis_fire_hotkey'], 1)
 
-    # 2) 插件结构（pull_curve / continuous_lead / humanize）
+    # 2) 插件结构（pull_curve / personal_trajectory / lock_confirm / head_aim / personal_motion）
     pull_curve: dict = {}
     if ctrl.get('pull_curve_enabled') is not None:
         pull_curve['enabled'] = bool(ctrl['pull_curve_enabled'])
@@ -440,18 +434,47 @@ def yu_body_to_profile(body: dict) -> dict:
     if pull_curve:
         mouse['pull_curve'] = pull_curve
 
-    continuous_lead: dict = {}
-    if ctrl.get('continuous_lead_enabled') is not None:
-        continuous_lead['enabled'] = bool(ctrl['continuous_lead_enabled'])
-    for yk, tk in [('continuous_lead_enter_distance', 'enter_distance'),
-                   ('continuous_lead_scale', 'scale'),
-                   ('continuous_lead_fade_in_ms', 'fade_in_ms'),
-                   ('continuous_lead_fade_out_ms', 'fade_out_ms'),
-                   ('continuous_lead_near_disable_ratio', 'near_disable_ratio')]:
+    # 拟人化整形（第1项）—— mouse.personal_trajectory.*
+    personal_traj = {}
+    if ctrl.get('personal_trajectory_enabled') is not None:
+        personal_traj['enabled'] = bool(ctrl['personal_trajectory_enabled'])
+    for yk, tk in [('personal_trajectory_speed_scale', 'speed_scale'),
+                   ('personal_trajectory_stability_scale', 'stability_scale'),
+                   ('personal_trajectory_variation_scale', 'variation_scale'),
+                   ('personal_trajectory_jitter_amp_px', 'jitter_amp_px'),
+                   ('personal_trajectory_fitts_intercept_ms', 'fitts_intercept_ms'),
+                   ('personal_trajectory_fitts_slope_ms_per_bit', 'fitts_slope_ms_per_bit')]:
         if ctrl.get(yk) is not None:
-            continuous_lead[tk] = ctrl[yk]
-    if continuous_lead:
-        mouse['continuous_lead'] = continuous_lead
+            personal_traj[tk] = ctrl[yk]
+    if personal_traj:
+        mouse['personal_trajectory'] = personal_traj
+
+    # 目标锁定确认（第2项）—— mouse.lock_confirm.*
+    lock_confirm = {}
+    if ctrl.get('lock_confirm_instant_enter_enabled') is not None:
+        lock_confirm['instant_enter_enabled'] = bool(ctrl['lock_confirm_instant_enter_enabled'])
+    for yk, tk in [('lock_confirm_confirmation_frames', 'confirmation_frames'),
+                   ('lock_confirm_enter_conf', 'enter_conf'),
+                   ('lock_confirm_hold_conf', 'hold_conf'),
+                   ('lock_confirm_instant_enter_dist', 'instant_enter_dist'),
+                   ('lock_confirm_instant_enter_conf', 'instant_enter_conf')]:
+        if ctrl.get(yk) is not None:
+            lock_confirm[tk] = ctrl[yk]
+    if lock_confirm:
+        mouse['lock_confirm'] = lock_confirm
+
+    # 头部瞄准约束（第3项）—— mouse.head_aim.*
+    head_aim = {}
+    if ctrl.get('head_aim_enabled') is not None:
+        head_aim['enabled'] = bool(ctrl['head_aim_enabled'])
+    for yk, tk in [('head_aim_head_offset_top_fraction', 'head_offset_top_fraction'),
+                   ('head_aim_head_height_fraction', 'head_height_fraction'),
+                   ('head_aim_safe_inset_fraction', 'safe_inset_fraction'),
+                   ('head_aim_max_lag_px', 'max_lag_px')]:
+        if ctrl.get(yk) is not None:
+            head_aim[tk] = ctrl[yk]
+    if head_aim:
+        mouse['head_aim'] = head_aim
 
     # 3) 个人移动曲线：TTBOX 自己的 RuntimeProfile 结构
     personal_motion = {}
@@ -575,7 +598,6 @@ def profile_to_yu(prof: dict) -> dict:
         'offset_y': mouse.get('offset_y', 0.5),
     }
     pc = mouse.get('pull_curve') or {}
-    cl = mouse.get('continuous_lead') or {}
     hz = mouse.get('humanize') or {}
     fov_p = prof.get('fov') or {}
     prev_p = prof.get('preview') or {}
@@ -583,9 +605,11 @@ def profile_to_yu(prof: dict) -> dict:
     cap = prof.get('capture') or {}
 
     personal_motion = mouse.get('personal_motion') or {}
+    personal_traj = mouse.get('personal_trajectory') or {}
+    lock_confirm = mouse.get('lock_confirm') or {}
+    head_aim = mouse.get('head_aim') or {}
     ctrl = {
         'kp_x': mouse.get('kp_x'), 'kp_y': mouse.get('kp_y'),
-        'ki_x': mouse.get('ki_x'), 'ki_y': mouse.get('ki_y'),
         'kd_x': mouse.get('kd_x'), 'kd_y': mouse.get('kd_y'),
         'predict_x': mouse.get('predict_x'), 'predict_y': mouse.get('predict_y'),
         'rate_x': mouse.get('rate_x'), 'rate_y': mouse.get('rate_y'),
@@ -594,26 +618,33 @@ def profile_to_yu(prof: dict) -> dict:
         'selector_lost_grace_ms': mouse.get('lost_grace_ms'),
         'aim_reference_offset_x': mouse.get('aim_offset_x'),
         'aim_reference_offset_y': mouse.get('aim_offset_y'),
-        'aim_fire_lock_y': mouse.get('aim_fire_lock_y', False),
-        'block_physical_mouse_x_while_aiming': mouse.get('block_physical_x', False),
-        'block_physical_mouse_y_while_aiming': mouse.get('block_physical_y', False),
-        'y_axis_fire_hotkey': _bits_to_hotkey(mouse.get('y_axis_fire_hotkey', 1)) or 'left',
-        'y_axis_fire_release_delay_sec': mouse.get('y_axis_fire_release_delay_sec', 0.3),
         'pull_curve_enabled': pc.get('enabled', True),
         'pull_curve_strength': pc.get('strength', 0.8),
         'pull_curve_jitter_px': pc.get('jitter_px', 3.0),
         'pull_curve_min_distance': pc.get('min_distance', 80),
-        'continuous_lead_enabled': cl.get('enabled', False),
-        'continuous_lead_enter_distance': cl.get('enter_distance', 150),
-        'continuous_lead_scale': cl.get('scale', 0.5),
-        'continuous_lead_fade_in_ms': cl.get('fade_in_ms', 300),
-        'continuous_lead_fade_out_ms': cl.get('fade_out_ms', 300),
-        'continuous_lead_near_disable_ratio': cl.get('near_disable_ratio', 0.66),
         'humanize_enabled': hz.get('enabled', True),
         'humanize_curve_strength': hz.get('curve_strength', 0.45),
         'humanize_jitter_px': hz.get('jitter_px', 0.25),
         'humanize_jitter_frequency': hz.get('jitter_frequency', 8),
         'selector_search_radius': mouse.get('selector_search_radius', 170),
+        'personal_trajectory_enabled': personal_traj.get('enabled', False),
+        'personal_trajectory_speed_scale': personal_traj.get('speed_scale', 1.0),
+        'personal_trajectory_stability_scale': personal_traj.get('stability_scale', 1.0),
+        'personal_trajectory_variation_scale': personal_traj.get('variation_scale', 1.0),
+        'personal_trajectory_jitter_amp_px': personal_traj.get('jitter_amp_px', 0.20),
+        'personal_trajectory_fitts_intercept_ms': personal_traj.get('fitts_intercept_ms', 120),
+        'personal_trajectory_fitts_slope_ms_per_bit': personal_traj.get('fitts_slope_ms_per_bit', 85),
+        'lock_confirm_confirmation_frames': lock_confirm.get('confirmation_frames', 1),
+        'lock_confirm_enter_conf': lock_confirm.get('enter_conf', 0.0),
+        'lock_confirm_hold_conf': lock_confirm.get('hold_conf', 0.0),
+        'lock_confirm_instant_enter_enabled': lock_confirm.get('instant_enter_enabled', True),
+        'lock_confirm_instant_enter_dist': lock_confirm.get('instant_enter_dist', 105.0),
+        'lock_confirm_instant_enter_conf': lock_confirm.get('instant_enter_conf', 0.5),
+        'head_aim_enabled': head_aim.get('enabled', False),
+        'head_aim_head_offset_top_fraction': head_aim.get('head_offset_top_fraction', 0.04),
+        'head_aim_head_height_fraction': head_aim.get('head_height_fraction', 0.28),
+        'head_aim_safe_inset_fraction': head_aim.get('safe_inset_fraction', 0.12),
+        'head_aim_max_lag_px': head_aim.get('max_lag_px', 1.25),
         'personal_motion_enabled': personal_motion.get('enabled', False),
         'personal_motion_curve_blend': personal_motion.get('curve_blend', 1.0),
         'personal_motion_speed_blend': personal_motion.get('speed_blend', 1.0),

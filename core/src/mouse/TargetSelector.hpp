@@ -47,7 +47,23 @@ struct TargetSelectorConfig {
     float aim_ratio_y = 0.2f;
     float switch_match_ratio = 0.4f; // rect_lock 匹配距离 = 目标对角 × 此比例
 
-    // ---- 选择器行为（第13阶段确认）----
+        // ---- ByteTrack 增强（第4项，参考 VisionForge bytetrack_tracker.py）----
+        // 在保持原有 track_lock/rect_lock/score 三层选择语义不变的前提下，
+        // 为轨迹增加"卡尔曼速度预测 + 轨迹生命周期"：
+        //   (1) association 参考点用 Kalman 预测框（非裸框心），
+        //       慢速/匀速目标在测试中预测≈当前 → 行为兼容旧用例。
+        //   (2) track 超 lost_frames 达 track_buffer_frames 即删除（修"只增不删"隐患）。
+        //   (3) 总轨迹数超过 max_tracks 时优先裁剪最早未命中（最长静默）轨迹。
+        float kalman_velocity_gain = 0.30f;  // 速度学习增益（VisionForge 0.22+q*8≈0.30）
+            float kalman_max_speed_px = 25.0f;   // 预测速度上限（px/帧），防抖预测过度
+            bool use_kalman_predict = false;      // 是否用卡尔曼预测中心做关联参考点
+                                                  // 默认关：保持"裸框心最近邻"传统行为（109 用例兼容）。
+                                                  // 开启时：匀速/快速目标用预测中心，抗遮挡/快速移动更稳，
+                                                  // 但会改变关联参考点（需真机调参验证后再启用）。
+            uint32_t track_buffer_frames = 30;   // 丢失缓冲帧数，超过即删除轨迹
+            uint32_t max_tracks = 64;            // 轨迹总上限（防内存无限增长）
+
+        // ---- 选择器行为（第13阶段确认）----
     // 选择排序：距离FOV中心排序后，若启用 priority，则同距离段内按优先级（越大越优先）。
     // 优先级（priority）用于"同距离竞争"时优先生成新 track / 参与 score 层。
     // 未启用（默认 0）时完全保持原有"距离最近优先"行为，兼容旧测试。
@@ -76,6 +92,17 @@ struct TrackEntry {
     uint32_t last_seen_ms = 0;       // 最后出现（外部时钟 ms）
     uint32_t lost_frames = 0;        // 连续丢失帧数
     bool active = false;             // 是否激活（锁定目标）
+
+    // ---- ByteTrack 卡尔曼状态（第4项）----
+    // 匀速模型 [cx, cy, w, h, vx, vy, vw, vh]，关联时用预测中心 (px, py)。
+    float kx = 0.0f, ky = 0.0f;      // 卡尔曼平滑位置
+    float kw = 0.0f, kh = 0.0f;      // 卡尔曼平滑尺寸
+    float vx = 0.0f, vy = 0.0f;      // 速度（px/帧）
+    float vw = 0.0f, vh = 0.0f;      // 尺寸变化率（px/帧）
+    float pred_cx = 0.0f, pred_cy = 0.0f;  // 预测中心（关联参考点）
+    uint32_t hits = 0;               // 累计命中帧数
+    bool confirmed = false;          // 是否已确认（hits 达标）
+    uint32_t created_ms = 0;         // 创建时间（用于存在时长排序，裁剪最旧）
 };
 
 // TargetSelector — 目标选择器：从多个检测框(DetectionBox)中挑出唯一要跟踪的目标。
@@ -113,13 +140,22 @@ private:
         return 0;
     }
     std::vector<Candidate> collect_candidates(const std::vector<DetectionBox>& dets,
-                                              const TargetSelectorConfig& cfg, float cx, float cy,
-                                              float radius_sq) const;
+                                                  const TargetSelectorConfig& cfg, float cx, float cy,
+                                                  float radius_sq) const;
 
-    std::vector<TrackEntry> tracks_;
-    int active_track_ = -1;          // 当前激活锁定 track id
-    TargetSelection::Reason last_reason_ = TargetSelection::kNone;
-    uint32_t next_id_ = 1;
-};
+        // ---- ByteTrack 辅助（第4项）----
+        // 用卡尔曼匀速模型预测轨迹下一帧中心（写入 pred_cx/pred_cy），关联参考点。
+        void kalman_predict(TrackEntry& t, const TargetSelectorConfig& cfg) const;
+        // 用观测框更新卡尔曼状态（位置平滑 + 速度学习），并重算预测中心。
+        void kalman_update(TrackEntry& t, const DetectionBox& obs, const TargetSelectorConfig& cfg,
+                           uint32_t now_ms);
+        // 轨迹生命周期：删除丢失超 buffer 的轨迹，并裁剪总轨迹数到 max_tracks 上限。
+        void trim_tracks(const TargetSelectorConfig& cfg);
+
+        std::vector<TrackEntry> tracks_;
+                    int active_track_ = -1;          // 当前激活锁定 track id
+                    TargetSelection::Reason last_reason_ = TargetSelection::kNone;
+                    uint32_t next_id_ = 1;
+        };
 
 }  // namespace ttbox::core::aim

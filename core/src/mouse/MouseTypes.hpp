@@ -68,6 +68,21 @@ struct ClassOffset {
     int priority = 0;       // 优先级（同类别多个 offset 时取 priority 最高）
 };
 
+// 头部瞄准约束（第3项，参考 VisionForge head_aim_policy）
+// 把瞄准点限制在"头框内部安全区"，防止瞄准点飘出头部（锁头稳定）。在 body 框上估算头区：
+//   head_top = y1 + head_offset_top_fraction × h（默认 0.04）
+//   head_bottom = y1 + (head_offset_top_fraction + head_height_fraction) × h（默认 0.04+0.28=0.32 → 上 32% 为头区）
+// 约束：aim point 必须落在头区内部（带安全内缩 fraction），且相对锚点单帧滞后 ≤ max_lag。
+// 只对"瞄头"生效（offset_y < 0.5）；瞄身体时不做头约束（保留身体偏移自由）。
+struct HeadAimConfig {
+    bool enabled = false;                 // 是否启用头区约束（默认关，保持现有行为）
+    float head_offset_top_fraction = 0.04f;  // 头区顶在 body 框内的 y 比例
+    float head_height_fraction = 0.28f;      // 头区高度占 body 框比例（0.28 ≈ 头占上 1/3）
+    float safe_inset_fraction = 0.12f;       // 头区内安全内缩比例（0~0.45）
+    float max_lag_fraction = 0.18f;          // 锚点滞后上限（相对头区尺寸比例）
+    float max_lag_px = 1.25f;                // 锚点滞后上限（px，取两者较小）
+};
+
 // 瞄准点配置（AimPointProfile）：
 //   默认瞄准点 = 框中心 + offset × 框尺寸；class_offsets 按类别覆盖。
 //   aim_offset_x/y = 瞄准参考点（准星）偏移，crop 系像素。
@@ -78,6 +93,7 @@ struct AimPointProfile {
     float aim_offset_y = 0.0f;
     std::vector<ClassOffset> class_offsets;
     int switch_delay_ms = 30;   // 类别偏移切换延迟（未启用前仅记录）
+    HeadAimConfig head_aim;     // 头部瞄准约束（第3项）
 };
 
 // 拉枪曲线（pull_curve：目标距离 ≥ min_distance 时在拉枪方向附加弧线/抖动）
@@ -104,6 +120,52 @@ struct HumanizeConfig {
     float curve_strength = 0.45f;  // 曲线混合强度
     float jitter_px = 0.25f;       // 抖动幅度 px
     float jitter_frequency = 8.0f; // 抖动频率 Hz
+};
+
+// 拟人化整形引擎（personal_trajectory_shader：Fitts 时长 + 速度包络 + 垂直抖动 + 自适应抑制 + 安全守卫）
+// 参考 VisionForge personal_trajectory_shaper 算法移植（见 docs/web/TTBOX_VISIONFORGE_对照分析.md 第 1 项）。
+// 作用在 AimThread 输出链 move_x/move_y（int16 HID count）上、热键 Gate 之前：
+//   把"恒定 PID 输出"整形为"接近真人手部动作"的移动包络（加速→减速 + 垂直随机抖动 + 安全钳制）。
+// 不绕过 PID / 死区 / 热键安全门（整形后仍被 Gate 归零）。
+// 区分于 personal_motion（倍率曲线，只改输出倍率）：本引擎是"完整移动轨迹整形"。
+struct PersonalTrajectoryConfig {
+    bool enabled = false;          // 总开关（默认关，保持现有行为）
+    // -- Fitts 时长模型：目标距离 → 一次移动的期望时长（接近真人）
+    float fitts_intercept_ms = 120.0f;      // 拦截常数（ms）
+    float fitts_slope_ms_per_bit = 85.0f;   // 每位斜率（ms）、Fitts law 对数距离
+    // -- 速度包络（transport 阶段加速/减速）
+    float speed_scale = 1.0f;               // 整体速度系数（0.75~1.25，>1 更快 = 时长更短）
+    float stability_scale = 1.0f;           // 稳定性系数（0.70~1.35，>1 更稳 = 时长更长）
+    // -- 抖动 / 曲线（垂直向随机游走，模拟人手曲线）
+    float variation_scale = 1.0f;           // 抖动幅度系数（0.40~1.80）
+    float max_extra_px = 2.0f;              // 单轴最大附加量（count）
+    float max_visual_variation_px = 1.5f;   // 视觉抖动上限（px）
+    float curve_time_constant_ms = 32.0f;   // 抖动自相关时间常数（ms）
+    float curve_rms_px = 0.8f;              // 抖动 RMS 基准（px）
+    float jitter_amp_px = 0.20f;            // 抖动幅度（px）
+    // -- 自适应抑制（大误差/目标快/目标老/方向突变 → 自动降强度或停用，防乱晃）
+    bool adaptive_enabled = true;           // 是否启用自适应抑制
+    float min_error_px = 18.0f;             // 小于此误差不抖动（close to target）
+    float urgent_error_px = 72.0f;          // 超过此误差视为大误差 → 停用整形（直出）
+    float urgent_speed_px_s = 520.0f;       // 目标移动速度超过此 → 停用整形
+    float max_target_age_ms = 18.0f;        // 目标年龄超过此 → 停用整形
+    float capture_priority_ms = 5.0f;       // 捕获前几 ms 停用整形（等镜头稳定）
+    float transport_gain = 0.16f;           // 中间段增益（加速峰，0~0.2）
+    float direction_change_cosine = 0.15f;  // 方向突变检测余弦阈值
+    // -- 响应参数（视觉抖动预算换算：target_radius / response_px_per_count）
+    float response_px_per_count = 0.65f;    // 每 count 对应 px（来自 gain_x/y_px_per_count 标定）
+};
+
+// 目标锁定确认配置（ENTER/HOLD 双阈值 + 确认帧 + instant-enter，第2项）
+// 参考 VisionForge control_gate：新目标需更高置信度连续确认，已锁目标用较低阈值保持（防闪烁），
+// 近距离高置信目标跳过确认窗（快瞄）。
+struct LockConfirmConfig {
+    int confirmation_frames = 1;      // 新目标连续确认帧数（默认 1=首帧即锁，兼容旧行为）
+    float enter_conf = 0.0f;          // 进入（新锁）置信度阈值
+    float hold_conf = 0.0f;           // 保持（已锁）置信度阈值（<= enter）
+    bool instant_enter_enabled = true; // 近距离高置信目标跳过确认窗
+    float instant_enter_dist = 105.0f; // instant-enter 距离阈值（px）
+    float instant_enter_conf = 0.50f;  // instant-enter 置信度阈值
 };
 
 // TTBOX 个人移动曲线模型：只保存已训练模型的安全运行参数。
@@ -169,12 +231,14 @@ struct MouseProfile {
     int y_axis_fire_hotkey = 0x01;              // 开火热键位掩码（1=left）
     float y_axis_fire_release_delay_sec = 0.3f; // 开火锁 Y 释放延迟
     // 插件配置（pull_curve / continuous_lead / humanize）
-    PullCurveConfig pull_curve;
-    ContinuousLeadConfig continuous_lead;
-    HumanizeConfig humanize;
-    PersonalMotionConfig personal_motion;
+        PullCurveConfig pull_curve;
+        ContinuousLeadConfig continuous_lead;
+        HumanizeConfig humanize;
+        PersonalMotionConfig personal_motion;
+        PersonalTrajectoryConfig personal_trajectory;  // 拟人化整形引擎（Fitts 时长+包络+垂直抖动+自适应抑制+安全守卫）
     AimPointProfile aim_point;
     float lost_grace_ms = 78.0f;                // 目标丢失宽限期
+    LockConfirmConfig lock_confirm;                 // 目标锁定确认（ENTER/HOLD + instant-enter，第2项）
     // A11 标定闭环：calibrating 强制 AIMING；calibration_bias_* 把准星带到偏置位再拉回
     bool calibrating = false;                   // 标定模式（自瞄全程输出，用偏置测闭环响应）
     float calibration_bias_x = 0.0f;            // 标定偏置 px（加在参考点上，自瞄自动拉到该点）

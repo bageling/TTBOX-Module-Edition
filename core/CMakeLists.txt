@@ -302,11 +302,31 @@ if(TTBOX_CORE_BUILD_TESTS)
   add_test(NAME test_hotkey_gate COMMAND test_hotkey_gate)
 
   # 拉枪曲线注入 AimThread 输出链测试（4 个验收场景）
-  add_executable(test_pull_curve_aimthread tests/test_pull_curve_aimthread.cpp)
-  target_link_libraries(test_pull_curve_aimthread PRIVATE ttbox_core)
-  add_test(NAME test_pull_curve_aimthread COMMAND test_pull_curve_aimthread)
+    add_executable(test_pull_curve_aimthread tests/test_pull_curve_aimthread.cpp)
+    target_link_libraries(test_pull_curve_aimthread PRIVATE ttbox_core)
+    add_test(NAME test_pull_curve_aimthread COMMAND test_pull_curve_aimthread)
 
-  # 热键完全可配置化验收（默认/换键/侧键/双键/any-all/免重启生效/未按键零输出）
+    # 拟人化整形引擎（第 1 项）单元测试
+      add_executable(test_personal_trajectory_shader tests/test_personal_trajectory_shader.cpp)
+      target_link_libraries(test_personal_trajectory_shader PRIVATE ttbox_core)
+      add_test(NAME test_personal_trajectory_shader COMMAND test_personal_trajectory_shader)
+
+      # 目标锁定确认（第 2 项：ENTER/HOLD/instant-enter）单元测试
+            add_executable(test_lock_confirm tests/test_lock_confirm.cpp)
+            target_link_libraries(test_lock_confirm PRIVATE ttbox_core)
+            add_test(NAME test_lock_confirm COMMAND test_lock_confirm)
+
+            # 头部瞄准约束（第 3 项）单元测试
+                        add_executable(test_head_aim_constraint tests/test_head_aim_constraint.cpp)
+                        target_link_libraries(test_head_aim_constraint PRIVATE ttbox_core)
+                        add_test(NAME test_head_aim_constraint COMMAND test_head_aim_constraint)
+
+                        # ByteTrack 增强（第4项：轨迹生命周期/最大上限/卡尔曼速度）单元测试
+                        add_executable(test_bytetrack_upgrade tests/test_bytetrack_upgrade.cpp)
+                        target_link_libraries(test_bytetrack_upgrade PRIVATE ttbox_core)
+                        add_test(NAME test_bytetrack_upgrade COMMAND test_bytetrack_upgrade)
+
+    # 热键完全可配置化验收（默认/换键/侧键/双键/any-all/免重启生效/未按键零输出）
   add_executable(test_hotkey_config tests/test_hotkey_config.cpp)
   target_link_libraries(test_hotkey_config PRIVATE ttbox_core)
   add_test(NAME test_hotkey_config COMMAND test_hotkey_config)

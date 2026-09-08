@@ -309,15 +309,18 @@
             <button id="controlSectionTabPullCurve" class="control-section-tab" type="button" data-control-section-target="control-section-pull-curve" aria-selected="false">
               <span>03</span>拉枪曲线
             </button>
-            <button id="controlSectionTabContinuousLead" class="control-section-tab" type="button" data-control-section-target="control-section-continuous-lead" aria-selected="false">
-              <span>04</span>持续提前量
+            <button id="controlSectionTabPersonalTrajectory" class="control-section-tab" type="button" data-control-section-target="control-section-personal-trajectory" aria-selected="false">
+              <span>04</span>拟人化整形
             </button>
-            <button id="controlSectionTabPhysicalMotionBlock" class="control-section-tab" type="button" data-control-section-target="control-section-physical-motion-block" aria-selected="false">
-              <span>05</span>屏蔽物理移动
+            <button id="controlSectionTabLockConfirm" class="control-section-tab" type="button" data-control-section-target="control-section-lock-confirm" aria-selected="false">
+              <span>05</span>锁定确认
+            </button>
+            <button id="controlSectionTabHeadAim" class="control-section-tab" type="button" data-control-section-target="control-section-head-aim" aria-selected="false">
+              <span>06</span>头部瞄准
             </button>
             {% if motion_training_available is not defined or motion_training_available %}
             <button id="controlSectionTabMotionTraining" class="control-section-tab" type="button" data-control-section-target="control-section-motion-training" aria-selected="false">
-              <span>06</span>个性曲线训练
+              <span>07</span>个性曲线训练
             </button>
             {% endif %}
           </nav>
@@ -335,8 +338,6 @@
                     <label class="field"><span class="field-label">Y轴拉力</span><input id="controller_kp_y" data-config type="number" step="0.1" max="100"><span class="field-hint">KP Y；Y轴方向把准星拉向目标的力度。抬不上去就加；Y轴晃就降。</span></label>
                     <label class="field"><span class="field-label">X轴预判</span><input id="controller_predict_x" data-config type="number" step="0.05" max="3"><span class="field-hint">PREDICT X；目标横着跑时提前往前看一点。滞后就加，提前过头就降。</span></label>
                     <label class="field"><span class="field-label">Y轴预判</span><input id="controller_predict_y" data-config type="number" step="0.05" max="3"><span class="field-hint">PREDICT Y；目标Y轴移动时提前看一点。一般保持很小，落地抖就别加。</span></label>
-                    <label class="field"><span class="field-label">X轴积分</span><input id="controller_ki_x" data-config type="number" step="0.01"><span class="field-hint" style="color:#d08000">⚠️ 未接线（死参数）：当前 PID 内核(Pid1)不使用外部积分项，调节无效。仅保留字段。</span></label>
-                    <label class="field"><span class="field-label">Y轴积分</span><input id="controller_ki_y" data-config type="number" step="0.01"><span class="field-hint" style="color:#d08000">⚠️ 未接线（死参数）：当前 PID 内核(Pid1)不使用外部积分项，调节无效。仅保留字段。</span></label>
                     <label class="field"><span class="field-label">X轴刹车</span><input id="controller_kd_x" data-config type="number" step="0.1" max="30"><span class="field-hint">KD X；对X轴速度变化做刹车。数值大容易抖，晃的时候优先调低。</span></label>
                     <label class="field"><span class="field-label">Y轴刹车</span><input id="controller_kd_y" data-config type="number" step="0.1" max="30"><span class="field-hint">KD Y；对Y轴速度变化做刹车。跳跃、落地发抖时先调低或关掉。</span></label>
                     <label class="field"><span class="field-label">X轴跟随</span><input id="controller_rate_x" data-config type="number" step="0.01"><span class="field-hint">RATE X；X轴输出变强的速度。反应慢就加一点；突然一窜就降一点。</span></label>
@@ -348,14 +349,6 @@
                   <div class="module-title"><strong>目标锁定</strong></div>
                   <div class="field-grid compact">
                     <label class="field"><span class="field-label">转火延迟 ms</span><input id="controller_selector_lost_grace_ms" data-config type="number" step="1"><span class="field-hint">目标丢失后切换到下一个目标的等待时间</span></label>
-                  </div>
-                </article>
-                <article class="module-tile">
-                  <div class="module-title"><strong>开火延迟释放Y轴</strong><span style="color:#d08000;font-size:.78em;margin-left:6px">⚠️ 未接线（死参数，调节无效，仅保留）</span></div>
-                  <label class="check-line"><input id="controller_aim_fire_lock_y" data-config type="checkbox"> 开火延迟释放Y轴</label>
-                  <div class="field-grid compact">
-                    <label class="field">开火按键<select id="controller_y_axis_fire_hotkey" data-config></select><span class="field-hint">用于判断开火状态，默认左键。</span></label>
-                    <label class="field"><span class="field-label">释放延迟 s</span><input id="controller_y_axis_fire_release_delay_sec" data-config type="number" step="0.01"><span class="field-hint">持续开火超过该时长后，停止输出Y轴方向，只保留X轴跟随。</span></label>
                   </div>
                 </article>
               </div>
@@ -375,29 +368,50 @@
               </div>
             </section>
 
-            <section id="control-section-continuous-lead" class="control-section" data-control-section hidden>
-              <div class="assist-grid control-group-grid continuous-lead-grid">
-                <article class="module-tile continuous-lead-card">
-                  <div class="module-title"><strong>持续提前量</strong><span style="color:#d08000;font-size:.78em;margin-left:6px">⚠️ 未接线（插件未启用，调节无效，仅保留）</span></div>
-                  <label class="check-line"><input id="controller_continuous_lead_enabled" data-config type="checkbox"> 启用持续提前量</label>
+            <section id="control-section-personal-trajectory" class="control-section" data-control-section hidden>
+              <div class="assist-grid control-group-grid pull-curve-grid">
+                <article class="module-tile pull-curve-card">
+                  <div class="module-title"><strong>拟人化整形</strong><span style="color:#3a9a5c;font-size:.78em;margin-left:6px">已接线（拟人化整形引擎，默认关）</span></div>
+                  <label class="check-line"><input id="controller_personal_trajectory_enabled" data-config type="checkbox"> 启用拟人化整形</label>
                   <div class="field-grid compact">
-                    <label class="field"><span class="field-label">进入距离 px</span><input id="controller_continuous_lead_enter_distance" data-config type="number" min="0" max="1280" step="1"><span class="field-hint">AI输出在X轴持续同方向累计超过该距离后，开始给瞄准点加入提前偏置。</span></label>
-                    <label class="field"><span class="field-label">提前量系数</span><input id="controller_continuous_lead_scale" data-config type="number" min="0" max="1" step="0.01"><span class="field-hint">偏置大小为目标框宽度乘该系数；0 为不产生偏置。</span></label>
-                    <label class="field"><span class="field-label">渐入时间 ms</span><input id="controller_continuous_lead_fade_in_ms" data-config type="number" min="0" max="1000" step="10"><span class="field-hint">达到进入距离后，提前量从0过渡到目标值的时间。</span></label>
-                    <label class="field"><span class="field-label">渐出时间 ms</span><input id="controller_continuous_lead_fade_out_ms" data-config type="number" min="0" max="1000" step="10"><span class="field-hint">停止同方向移动或反向时，提前量回到0的时间。</span></label>
-                    <label class="field"><span class="field-label">近距离禁用占比</span><input id="controller_continuous_lead_near_disable_ratio" data-config type="number" min="0" max="1" step="0.01"><span class="field-hint">目标框宽度占裁剪宽度达到该比例时，持续提前量直接关闭。</span></label>
+                    <label class="field"><span class="field-label">移动灵敏度</span><input id="controller_personal_trajectory_speed_scale" data-config type="number" min="0" max="2" step="0.01"><span class="field-hint">整体移动节奏快慢；高一点目标更跟手，低一点更稳。</span></label>
+                    <label class="field"><span class="field-label">稳定性</span><input id="controller_personal_trajectory_stability_scale" data-config type="number" min="0" max="2" step="0.01"><span class="field-hint">移动路径的稳定程度；高一点抖动更少，低一点更灵活。</span></label>
+                    <label class="field"><span class="field-label">随机变化</span><input id="controller_personal_trajectory_variation_scale" data-config type="number" min="0" max="2" step="0.01"><span class="field-hint">每次出手的差异感；高一点更像人手，低一点更机械。</span></label>
+                    <label class="field"><span class="field-label">垂直抖动 px</span><input id="controller_personal_trajectory_jitter_amp_px" data-config type="number" min="0" max="2" step="0.01"><span class="field-hint">垂直方向附加的微抖动幅度；为 0 关闭抖动手感。</span></label>
+                    <label class="field"><span class="field-label">基础时长 ms</span><input id="controller_personal_trajectory_fitts_intercept_ms" data-config type="number" min="50" max="300" step="1"><span class="field-hint">短距离移动的基础耗时；高一点移动更慢更柔。</span></label>
+                    <label class="field"><span class="field-label">距离系数</span><input id="controller_personal_trajectory_fitts_slope_ms_per_bit" data-config type="number" min="0" max="300" step="1"><span class="field-hint">距离越远加时越多；高一点远距离更慢更稳。</span></label>
                   </div>
                 </article>
               </div>
             </section>
 
-            <section id="control-section-physical-motion-block" class="control-section" data-control-section hidden>
-              <div class="assist-grid control-group-grid">
-                <article class="module-tile">
-                  <div class="module-title"><strong>屏蔽物理移动</strong><span style="color:#d08000;font-size:.78em;margin-left:6px">⚠️ 未接线（死参数，调节无效，仅保留）</span><span id="physicalMotionBlockSupport" class="status-badge idle">检查中</span></div>
-                  <label class="check-line"><input id="controller_block_physical_mouse_x_while_aiming" data-config type="checkbox"> 瞄准时屏蔽鼠标移动X轴</label>
-                  <label class="check-line"><input id="controller_block_physical_mouse_y_while_aiming" data-config type="checkbox"> 瞄准时屏蔽鼠标移动Y轴</label>
-                  <p id="physicalMotionBlockHint" class="field-hint"></p>
+            <section id="control-section-lock-confirm" class="control-section" data-control-section hidden>
+              <div class="assist-grid control-group-grid pull-curve-grid">
+                <article class="module-tile pull-curve-card">
+                  <div class="module-title"><strong>锁定确认</strong><span style="color:#3a9a5c;font-size:.78em;margin-left:6px">已接线（目标锁定确认，默认首帧即锁）</span></div>
+                  <label class="check-line"><input id="controller_lock_confirm_instant_enter_enabled" data-config type="checkbox"> 近距离秒锁（目标贴脸时立即锁定，跳过确认）</label>
+                  <div class="field-grid compact">
+                    <label class="field"><span class="field-label">确认帧数</span><input id="controller_lock_confirm_confirmation_frames" data-config type="number" min="1" max="30" step="1"><span class="field-hint">需要连续多少帧确认才锁定新目标；1 为立即锁，越高越不易误锁。</span></label>
+                    <label class="field"><span class="field-label">进入置信度</span><input id="controller_lock_confirm_enter_conf" data-config type="number" min="0" max="1" step="0.01"><span class="field-hint">锁定新目标所需的最低置信度；0 为不限制。</span></label>
+                    <label class="field"><span class="field-label">保持置信度</span><input id="controller_lock_confirm_hold_conf" data-config type="number" min="0" max="1" step="0.01"><span class="field-hint">已锁定目标保持锁定所需的最低置信度；低于它才考虑换目标。</span></label>
+                    <label class="field"><span class="field-label">秒锁距离 px</span><input id="controller_lock_confirm_instant_enter_dist" data-config type="number" min="0" max="640" step="1"><span class="field-hint">目标距准星小于该距离且高置信时跳过确认窗直接锁定。</span></label>
+                    <label class="field"><span class="field-label">秒锁置信度</span><input id="controller_lock_confirm_instant_enter_conf" data-config type="number" min="0" max="1" step="0.01"><span class="field-hint">秒锁场景要求的最低置信度。</span></label>
+                  </div>
+                </article>
+              </div>
+            </section>
+
+            <section id="control-section-head-aim" class="control-section" data-control-section hidden>
+              <div class="assist-grid control-group-grid pull-curve-grid">
+                <article class="module-tile pull-curve-card">
+                  <div class="module-title"><strong>头部瞄准</strong><span style="color:#3a9a5c;font-size:.78em;margin-left:6px">已接线（头部锚点约束，默认关）</span></div>
+                  <label class="check-line"><input id="controller_head_aim_enabled" data-config type="checkbox"> 启用头部瞄准约束</label>
+                  <div class="field-grid compact">
+                    <label class="field"><span class="field-label">头区上沿</span><input id="controller_head_aim_head_offset_top_fraction" data-config type="number" min="0" max="1" step="0.01"><span class="field-hint">头区顶部在人体框内的位置比例（0=框顶）。</span></label>
+                    <label class="field"><span class="field-label">头区高度</span><input id="controller_head_aim_head_height_fraction" data-config type="number" min="0" max="1" step="0.01"><span class="field-hint">头区高度占人体框的比例；约等于头部占比。</span></label>
+                    <label class="field"><span class="field-label">安全内缩</span><input id="controller_head_aim_safe_inset_fraction" data-config type="number" min="0" max="0.45" step="0.01"><span class="field-hint">瞄准点离头区边缘的内缩距离；越大越往头中心靠，锁头更稳。</span></label>
+                    <label class="field"><span class="field-label">滞后上限 px</span><input id="controller_head_aim_max_lag_px" data-config type="number" min="0" max="10" step="0.05"><span class="field-hint">单帧瞄准点最大移动量；越小越稳，太大头会晃。</span></label>
+                  </div>
                 </article>
               </div>
             </section>

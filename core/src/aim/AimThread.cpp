@@ -8,6 +8,7 @@
 #include "mouse/CoordinateTransform.hpp"
 #include "mouse/AimPointProfile.hpp"
 #include "mouse/PersonalMotion.hpp"
+#include "mouse/PersonalTrajectoryShader.hpp"
 namespace ttbox::core::aim {
 bool AimThread::start(AimTargetMailbox* mailbox, std::shared_ptr<output::IHidOutput> output, int interval_us, RuntimeConfig* runtime_config, std::atomic<uint16_t>* physical_buttons) {
     if (!mailbox || !output || running_.exchange(true)) return false;
@@ -42,8 +43,10 @@ void AimThread::loop() {
             float out_deadzone = 1.0f;
             PersonalMotionConfig personal_motion;
             PullCurveConfig pull_curve_cfg;  // 拉枪曲线配置（默认 enabled=true, min_distance=80, strength=0.8）
+            PersonalTrajectoryConfig personal_traj_cfg;  // 拟人化整形引擎配置（默认 enabled=false，保持现有行为）
             float kp_x = 0.0f, kp_y = 0.0f, kd_x = 0.0f, kd_y = 0.0f;
             AimPointProfile aim_point;
+            LockConfirmConfig lock_confirm_cfg;  // 目标锁定确认（ENTER/HOLD，第2项）
             if (runtime_config_) {
                 auto profile = runtime_config_->snapshot();
                 if (profile) {
@@ -62,6 +65,8 @@ void AimThread::loop() {
                     out_deadzone = profile->mouse.output_deadzone;
                     personal_motion = profile->mouse.personal_motion;
                     pull_curve_cfg = profile->mouse.pull_curve;
+                    personal_traj_cfg = profile->mouse.personal_trajectory;
+                    lock_confirm_cfg = profile->mouse.lock_confirm;
                     pid_x_.configure(kp_x, kd_x, profile->mouse.predict_x,
                                      profile->mouse.rate_x, profile->mouse.smooth_x);
                     pid_y_.configure(kp_y, kd_y, profile->mouse.predict_y,
@@ -93,7 +98,9 @@ void AimThread::loop() {
             AimStateEvent event; event.has_target = selected.valid;
             event.hotkey_active = injection_allowed;
             event.now_ms = task.timestamp_us / 1000ULL;
-            if (state_machine_.update(event, scfg.lost_grace_ms)) { controller_.reset(); pid_x_.reset(); pid_y_.reset(); remainder_x_=0.0f; remainder_y_=0.0f; last_target_id_=-1; }
+            event.target_confidence = selected.valid ? selected.box.score : 0.0f;
+            event.target_distance = selected.distance;
+            if (state_machine_.update(event, scfg.lost_grace_ms, lock_confirm_cfg)) { controller_.reset(); pid_x_.reset(); pid_y_.reset(); remainder_x_=0.0f; remainder_y_=0.0f; last_target_id_=-1; }
             int16_t move_x = 0, move_y = 0; float ex = 0.0f, ey = 0.0f;
             float pred_ex = 0.0f, pred_ey = 0.0f;  // 第15阶段：预测误差
             float tx = 0.0f, ty = 0.0f, ref_x = 0.0f, ref_y = 0.0f;
@@ -116,6 +123,11 @@ void AimThread::loop() {
                     tx = (selected.box.x1 + selected.box.x2) * 0.5f;
                     ty = selected.box.y1 + (selected.box.y2 - selected.box.y1) * 0.15f;
                 }
+                // 第3项：头部瞄准约束（默认关）。若启用且瞄头，把瞄准点钳进头区安全区
+                // 并限制单帧滞后，防止锁头时瞄准点飘出头部。约束在 AimPointProfile.cpp。
+                if (aim_point.head_aim.enabled) {
+                    constrain_aim_point_to_head(selected.box, aim_point, &tx, &ty);
+                }
                 // 第15阶段：目标跟踪器（速度估计 + 预测）。
                 // 目标切换（target_id 变化）→ tracker 内部 Reset（速度清零）。
                 // prediction_time_s_>0 时用预测点做控制误差；=0 保持原行为（直接用瞄准点）。
@@ -131,6 +143,7 @@ void AimThread::loop() {
                     // 目标切换：速度/加速度来自旧目标，必须清除预测状态。
                     pid_x_.reset(); pid_y_.reset(); controller_.reset(); remainder_x_ = remainder_y_ = 0.0f;
                     pull_curve_.reset();  // 拉枪曲线时间基准清零（新目标重新拉枪）
+                    personal_shader_.reset();  // 拟人化整形重置（新目标重新整形）
                 }
                 last_target_id_ = selected.target_id;
                 // AIBOX 对标：不做位置外推；误差直接来自本帧检测结果。
@@ -204,6 +217,25 @@ void AimThread::loop() {
                 if (!std::isfinite(remainder_x_) || !std::isfinite(remainder_y_)) {
                     remainder_x_ = 0.0f; remainder_y_ = 0.0f;
                     pid_x_.reset(); pid_y_.reset();
+                }
+                // ---- 拟人化整形引擎（第 1 项落地）：对 move_x/move_y 做 Fitts 时长+速度包络+垂直抖动 ----
+                // 只作用于热键 Gate 之前；Gate 关闭时输出仍被归零（安全边界不变）。
+                // 输入：已量化 count(dx,dy) + 控制误差 px(ex,ey)；按需激活（新目标首次有效帧）。
+                if (personal_traj_cfg.enabled && injection_allowed) {
+                    if (!personal_shader_.active()) {
+                        // 激活一次移动：用当前控制误差距离作为本次移动目标距离
+                        personal_shader_.activate(std::hypot(control_x, control_y), personal_traj_cfg);
+                        target_age_ms_ = 0.0f;
+                    }
+                    // 运行时参数：目标速度（tracker 估）、目标年龄、目标框半径
+                    const auto& ts = tracker_.state();
+                    personal_shader_.set_error_speed_px_s(ts.valid ? std::hypot(ts.vx, ts.vy) : 0.0f);
+                    personal_shader_.set_target_age_ms(target_age_ms_);
+                    target_age_ms_ += dt_ms;
+                    personal_shader_.set_target_radius_px(
+                        (selected.box.y2 - selected.box.y1) * 0.5f);
+                    personal_shader_.shape(&move_x, &move_y, control_x, control_y, dt_ms,
+                                           personal_traj_cfg);
                 }
             }
             // ---- Hotkey Gate 兜底（安全边界最后一行）----

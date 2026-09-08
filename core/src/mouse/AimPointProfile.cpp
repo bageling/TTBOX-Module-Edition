@@ -1,6 +1,8 @@
 // AimPointProfile.cpp — A10 瞄准点计算实现
 #include "mouse/AimPointProfile.hpp"
 
+#include <algorithm>
+
 namespace ttbox::core::aim {
 
 void class_offset_for(const AimPointProfile& prof, int class_id,
@@ -30,6 +32,54 @@ bool aim_point_at(const DetectionBox& box, int class_id, const AimPointProfile& 
     *tx = box.x1 + ox * w;
     *ty = box.y1 + oy * h;
     return true;
+}
+
+bool constrain_aim_point_to_head(const DetectionBox& box, const AimPointProfile& prof,
+                                 float* tx, float* ty) {
+    const HeadAimConfig& cfg = prof.head_aim;
+    if (!cfg.enabled) return false;
+    // 只对"瞄头"生效（默认 offset_y < 0.5 = 框上半部 = 头部方向）
+        float class_oy = prof.offset_y;
+        float class_ox_tmp = prof.offset_x;  // class_offset_for 会写 offset_x，需传非空
+        class_offset_for(prof, box.class_id, &class_ox_tmp, &class_oy);  // 取类偏移
+        if (class_oy >= 0.5f) return false;  // 瞄身体：不做头约束
+
+    const float w = box.x2 - box.x1;
+    const float h = box.y2 - box.y1;
+    if (w <= 0.0f || h <= 0.0f) return false;
+
+    // 估算头区（body 框顶部一段）
+    const float head_top = box.y1 + cfg.head_offset_top_fraction * h;
+    const float head_bottom = box.y1 + (cfg.head_offset_top_fraction + cfg.head_height_fraction) * h;
+    if (head_bottom <= head_top) return false;
+
+    // 头区安全内缩（safe inset）
+    const float inset_y = (head_bottom - head_top) * cfg.safe_inset_fraction;
+    const float inset_x = w * cfg.safe_inset_fraction;
+    float safe_y1 = head_top + inset_y;
+    float safe_y2 = head_bottom - inset_y;
+    float safe_x1 = box.x1 + inset_x;
+    float safe_x2 = box.x2 - inset_x;
+    if (safe_y1 > safe_y2) { const float c = (safe_y1 + safe_y2) * 0.5f; safe_y1 = safe_y2 = c; }
+    if (safe_x1 > safe_x2) { const float c = (safe_x1 + safe_x2) * 0.5f; safe_x1 = safe_x2 = c; }
+
+    // 锚点滞后钳制（限制单帧最大移动，防瞄准点大幅跳变出安全区）
+    // max_lag = min(max_lag_px, 头高 × max_lag_fraction)
+    const float lag_y = std::min(cfg.max_lag_px, (head_bottom - head_top) * cfg.max_lag_fraction);
+    const float lag_x = std::min(cfg.max_lag_px, w * cfg.max_lag_fraction);
+    const float anchor_x = box.x1 + w * 0.5f;  // 头中心 x（头宽≈框宽）
+    const float anchor_y = (head_top + head_bottom) * 0.5f;
+    float lo_x = std::max(safe_x1, anchor_x - lag_x);
+    float hi_x = std::min(safe_x2, anchor_x + lag_x);
+    float lo_y = std::max(safe_y1, anchor_y - lag_y);
+    float hi_y = std::min(safe_y2, anchor_y + lag_y);
+    if (lo_x > hi_x) { const float c = (lo_x + hi_x) * 0.5f; lo_x = hi_x = c; }
+    if (lo_y > hi_y) { const float c = (lo_y + hi_y) * 0.5f; lo_y = hi_y = c; }
+
+    const float x0 = *tx, y0 = *ty;
+    *tx = std::max(lo_x, std::min(hi_x, *tx));
+    *ty = std::max(lo_y, std::min(hi_y, *ty));
+    return (*tx != x0) || (*ty != y0);
 }
 
 }  // namespace ttbox::core::aim

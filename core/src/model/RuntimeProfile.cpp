@@ -311,6 +311,44 @@ JsonValue RuntimeProfile::to_json() const {
     }
     pm.set("knots", std::move(knots));
     m.set("personal_motion", std::move(pm));
+    JsonValue pt = JsonValue::object();
+    pt.set("enabled", JsonValue::boolean(mouse.personal_trajectory.enabled));
+    pt.set("fitts_intercept_ms", JsonValue::number(static_cast<double>(mouse.personal_trajectory.fitts_intercept_ms)));
+    pt.set("fitts_slope_ms_per_bit", JsonValue::number(static_cast<double>(mouse.personal_trajectory.fitts_slope_ms_per_bit)));
+    pt.set("speed_scale", JsonValue::number(static_cast<double>(mouse.personal_trajectory.speed_scale)));
+    pt.set("stability_scale", JsonValue::number(static_cast<double>(mouse.personal_trajectory.stability_scale)));
+    pt.set("variation_scale", JsonValue::number(static_cast<double>(mouse.personal_trajectory.variation_scale)));
+    pt.set("max_extra_px", JsonValue::number(static_cast<double>(mouse.personal_trajectory.max_extra_px)));
+    pt.set("max_visual_variation_px", JsonValue::number(static_cast<double>(mouse.personal_trajectory.max_visual_variation_px)));
+    pt.set("curve_time_constant_ms", JsonValue::number(static_cast<double>(mouse.personal_trajectory.curve_time_constant_ms)));
+    pt.set("curve_rms_px", JsonValue::number(static_cast<double>(mouse.personal_trajectory.curve_rms_px)));
+    pt.set("jitter_amp_px", JsonValue::number(static_cast<double>(mouse.personal_trajectory.jitter_amp_px)));
+    pt.set("adaptive_enabled", JsonValue::boolean(mouse.personal_trajectory.adaptive_enabled));
+    pt.set("min_error_px", JsonValue::number(static_cast<double>(mouse.personal_trajectory.min_error_px)));
+    pt.set("urgent_error_px", JsonValue::number(static_cast<double>(mouse.personal_trajectory.urgent_error_px)));
+    pt.set("urgent_speed_px_s", JsonValue::number(static_cast<double>(mouse.personal_trajectory.urgent_speed_px_s)));
+    pt.set("max_target_age_ms", JsonValue::number(static_cast<double>(mouse.personal_trajectory.max_target_age_ms)));
+    pt.set("capture_priority_ms", JsonValue::number(static_cast<double>(mouse.personal_trajectory.capture_priority_ms)));
+    pt.set("transport_gain", JsonValue::number(static_cast<double>(mouse.personal_trajectory.transport_gain)));
+    pt.set("direction_change_cosine", JsonValue::number(static_cast<double>(mouse.personal_trajectory.direction_change_cosine)));
+    pt.set("response_px_per_count", JsonValue::number(static_cast<double>(mouse.personal_trajectory.response_px_per_count)));
+    m.set("personal_trajectory", std::move(pt));
+    JsonValue lk = JsonValue::object();
+    lk.set("confirmation_frames", JsonValue::number(static_cast<double>(mouse.lock_confirm.confirmation_frames)));
+    lk.set("enter_conf", JsonValue::number(static_cast<double>(mouse.lock_confirm.enter_conf)));
+    lk.set("hold_conf", JsonValue::number(static_cast<double>(mouse.lock_confirm.hold_conf)));
+    lk.set("instant_enter_enabled", JsonValue::boolean(mouse.lock_confirm.instant_enter_enabled));
+    lk.set("instant_enter_dist", JsonValue::number(static_cast<double>(mouse.lock_confirm.instant_enter_dist)));
+    lk.set("instant_enter_conf", JsonValue::number(static_cast<double>(mouse.lock_confirm.instant_enter_conf)));
+    m.set("lock_confirm", std::move(lk));
+    JsonValue ha = JsonValue::object();
+    ha.set("enabled", JsonValue::boolean(mouse.aim_point.head_aim.enabled));
+    ha.set("head_offset_top_fraction", JsonValue::number(static_cast<double>(mouse.aim_point.head_aim.head_offset_top_fraction)));
+    ha.set("head_height_fraction", JsonValue::number(static_cast<double>(mouse.aim_point.head_aim.head_height_fraction)));
+    ha.set("safe_inset_fraction", JsonValue::number(static_cast<double>(mouse.aim_point.head_aim.safe_inset_fraction)));
+    ha.set("max_lag_fraction", JsonValue::number(static_cast<double>(mouse.aim_point.head_aim.max_lag_fraction)));
+    ha.set("max_lag_px", JsonValue::number(static_cast<double>(mouse.aim_point.head_aim.max_lag_px)));
+    m.set("head_aim", std::move(ha));
     m.set("aim_offset_x", JsonValue::number(static_cast<double>(mouse.aim_point.aim_offset_x)));
     m.set("aim_offset_y", JsonValue::number(static_cast<double>(mouse.aim_point.aim_offset_y)));
     m.set("offset_x", JsonValue::number(static_cast<double>(mouse.aim_point.offset_x)));
@@ -460,6 +498,49 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
                     }
                 }
             }
+        }
+        if (const JsonValue* pt = m->find("personal_trajectory"); pt && pt->is_object()) {
+            p.mouse.personal_trajectory.enabled = obj_bool(*pt, "enabled", false);
+            p.mouse.personal_trajectory.fitts_intercept_ms = static_cast<float>(obj_num(*pt, "fitts_intercept_ms", 120.0));
+            p.mouse.personal_trajectory.fitts_slope_ms_per_bit = static_cast<float>(obj_num(*pt, "fitts_slope_ms_per_bit", 85.0));
+            p.mouse.personal_trajectory.speed_scale = static_cast<float>(obj_num(*pt, "speed_scale", 1.0));
+            p.mouse.personal_trajectory.stability_scale = static_cast<float>(obj_num(*pt, "stability_scale", 1.0));
+            p.mouse.personal_trajectory.variation_scale = static_cast<float>(obj_num(*pt, "variation_scale", 1.0));
+            p.mouse.personal_trajectory.max_extra_px = static_cast<float>(obj_num(*pt, "max_extra_px", 2.0));
+            p.mouse.personal_trajectory.max_visual_variation_px = static_cast<float>(obj_num(*pt, "max_visual_variation_px", 1.5));
+            p.mouse.personal_trajectory.curve_time_constant_ms = static_cast<float>(obj_num(*pt, "curve_time_constant_ms", 32.0));
+            p.mouse.personal_trajectory.curve_rms_px = static_cast<float>(obj_num(*pt, "curve_rms_px", 0.8));
+            p.mouse.personal_trajectory.jitter_amp_px = static_cast<float>(obj_num(*pt, "jitter_amp_px", 0.20));
+            p.mouse.personal_trajectory.adaptive_enabled = obj_bool(*pt, "adaptive_enabled", true);
+            p.mouse.personal_trajectory.min_error_px = static_cast<float>(obj_num(*pt, "min_error_px", 18.0));
+            p.mouse.personal_trajectory.urgent_error_px = static_cast<float>(obj_num(*pt, "urgent_error_px", 72.0));
+            p.mouse.personal_trajectory.urgent_speed_px_s = static_cast<float>(obj_num(*pt, "urgent_speed_px_s", 520.0));
+            p.mouse.personal_trajectory.max_target_age_ms = static_cast<float>(obj_num(*pt, "max_target_age_ms", 18.0));
+            p.mouse.personal_trajectory.capture_priority_ms = static_cast<float>(obj_num(*pt, "capture_priority_ms", 5.0));
+            p.mouse.personal_trajectory.transport_gain = static_cast<float>(obj_num(*pt, "transport_gain", 0.16));
+            p.mouse.personal_trajectory.direction_change_cosine = static_cast<float>(obj_num(*pt, "direction_change_cosine", 0.15));
+            p.mouse.personal_trajectory.response_px_per_count = static_cast<float>(obj_num(*pt, "response_px_per_count", 0.65));
+        }
+        if (const JsonValue* lk = m->find("lock_confirm"); lk && lk->is_object()) {
+            p.mouse.lock_confirm.confirmation_frames = static_cast<int>(obj_int(*lk, "confirmation_frames", 1));
+            p.mouse.lock_confirm.enter_conf = static_cast<float>(obj_num(*lk, "enter_conf", 0.0));
+            p.mouse.lock_confirm.hold_conf = static_cast<float>(obj_num(*lk, "hold_conf", 0.0));
+            p.mouse.lock_confirm.instant_enter_enabled = obj_bool(*lk, "instant_enter_enabled", true);
+            p.mouse.lock_confirm.instant_enter_dist = static_cast<float>(obj_num(*lk, "instant_enter_dist", 105.0));
+            p.mouse.lock_confirm.instant_enter_conf = static_cast<float>(obj_num(*lk, "instant_enter_conf", 0.50));
+        }
+        if (const JsonValue* ha = m->find("head_aim"); ha && ha->is_object()) {
+            auto obj_num2 = [&](const char* k, double d) {
+                const JsonValue* v = ha->find(k);
+                return (v && v->is_number()) ? v->as_number() : d;
+            };
+            const JsonValue* en = ha->find("enabled");
+            p.mouse.aim_point.head_aim.enabled = (en && en->is_bool()) ? en->as_bool(false) : false;
+            p.mouse.aim_point.head_aim.head_offset_top_fraction = static_cast<float>(obj_num2("head_offset_top_fraction", 0.04));
+            p.mouse.aim_point.head_aim.head_height_fraction = static_cast<float>(obj_num2("head_height_fraction", 0.28));
+            p.mouse.aim_point.head_aim.safe_inset_fraction = static_cast<float>(obj_num2("safe_inset_fraction", 0.12));
+            p.mouse.aim_point.head_aim.max_lag_fraction = static_cast<float>(obj_num2("max_lag_fraction", 0.18));
+            p.mouse.aim_point.head_aim.max_lag_px = static_cast<float>(obj_num2("max_lag_px", 1.25));
         }
         p.mouse.aim_point.aim_offset_x = static_cast<float>(obj_num(*m, "aim_offset_x", 0.0));
         p.mouse.aim_point.aim_offset_y = static_cast<float>(obj_num(*m, "aim_offset_y", 0.0));
