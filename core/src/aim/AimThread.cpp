@@ -110,6 +110,8 @@ void AimThread::loop() {
             float pred_ex = 0.0f, pred_ey = 0.0f;  // 第15阶段：预测误差
             float tx = 0.0f, ty = 0.0f, ref_x = 0.0f, ref_y = 0.0f;
             float aibox_x = 0.0f, aibox_y = 0.0f, scaled_x = 0.0f, scaled_y = 0.0f;
+            bool fov_mode_active = false;  // FOV 模式：fov_move 已是 count 域最终移动量，旁路 PID 的 kp×err
+            float fov_out_x = 0.0f, fov_out_y = 0.0f;  // FOV 模式输出（count 域）
             float trace_control_x = 0.0f, trace_control_y = 0.0f;
             float trace_smith_dx = 0.0f, trace_smith_dy = 0.0f;
             // ---- Hotkey Gate：最终输出安全边界 ----
@@ -173,23 +175,33 @@ void AimThread::loop() {
                             control_y += profile->mouse.calibration_bias_y;
                         }
                         if (profile->mouse.fov_mode) {
-                        // FOV 模式：先将像素误差转换为角度对应的鼠标移动量。
-                        control_x = fov_move_x(ex, static_cast<float>(task.frame_width),
+                        // FOV 模式：像素误差 → 角度 → HID count（fov_move 输出已是最终移动量）。
+                        // 修复点：此前把 count 域输出替换 control_x 再进 PID（kp=25×count）双重缩放。
+                        // 现在 control_x 保持像素域（个人曲线/拉枪距离判定需要像素域），
+                        // fov 输出存入 fov_out，在 PID 调用处直接旁路（见 L191-193）。
+                        fov_out_x = fov_move_x(ex, static_cast<float>(task.frame_width),
                                                profile->mouse.hfov, profile->mouse.move_speed_x);
-                        control_y = fov_move_y(ey, static_cast<float>(task.frame_height),
+                        fov_out_y = fov_move_y(ey, static_cast<float>(task.frame_height),
                                                profile->mouse.vfov, profile->mouse.move_speed_y);
+                        fov_mode_active = true;
                         }
                     }
                 }
                 const float dt = previous_timestamp_us > 0 && task.timestamp_us > previous_timestamp_us
                     ? static_cast<float>(task.timestamp_us - previous_timestamp_us) / 1000000.0f : 0.004f;
                 const float dt_ms = dt * 1000.0f;  // 拉枪曲线抖动需要毫秒级时间基准
-                // pid1.cpp P_PID 直接消费控制域误差（FOV 开启时已是 HID count 域）。
+                // pid1.cpp P_PID 直接消费控制域误差（像素域）。
+                // FOV 模式：fov_out 已是 count 域最终移动量，直接作为控制器输出（旁路 kp×err）。
                 trace_smith_dx = 0.0f; trace_smith_dy = 0.0f;
                 trace_control_x = control_x; trace_control_y = control_y;
-                // pid1.cpp P_PID：X predict=3.0，Y predict=0（main() 原始参数）。
-                aibox_x = static_cast<float>(pid_x_.update(control_x));
-                aibox_y = static_cast<float>(pid_y_.update(control_y));
+                if (fov_mode_active) {
+                    aibox_x = fov_out_x;
+                    aibox_y = fov_out_y;
+                } else {
+                    // pid1.cpp P_PID：X predict=3.0，Y predict=0（main() 原始参数）。
+                    aibox_x = static_cast<float>(pid_x_.update(control_x));
+                    aibox_y = static_cast<float>(pid_y_.update(control_y));
+                }
                 // 输出链：P_PID 输出 × sens（全局灵敏度） × output_scale。
                 // rate_x/y 已在 Pid1 内部作为 kp_gain_rate 消费，此处不再重复。
                 const float out_gain = out_sensitivity * out_scale;

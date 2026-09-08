@@ -8,7 +8,6 @@
 #include <cstring>
 
 #include "common/Types.hpp"
-#include "mouse/MouseProxyMode.hpp"
 
 namespace ttbox::core::aim {
 
@@ -204,18 +203,14 @@ struct PersonalMotionConfig {
 // 鼠标配置（RuntimeProfile.mouse，与模型彻底分离）
 struct MouseProfile {
     bool enabled = false;                       // AI 注入总开关（false = 纯物理透传，与 A9 一致）
-    MouseProxyMode proxy_mode = MouseProxyMode::kFullPassthrough;  // V1 仅 full_passthrough
     uint8_t aim_hotkey = 0x02;                  // 瞄准主热键位掩码：1=left 2=right 4=middle 8=back 16=forward
     uint8_t aim_hotkey2 = 0x00;                 // 瞄准副热键位掩码（0=不使用）
     int aim_hotkey_mode = 0;                    // 触发方式：0=任一按键(any) 1=同时按下(all)
     float fov_range = 1.0f;                     // 目标选择范围（0~1，仅影响目标选择）
     float confidence = 0.25f;                   // 目标置信度阈值（目标选择）
-    float prediction_s = 0.0f;                  // 预测时间（s）：predicted = pos + vel × prediction_s
     // PID 默认值以用户提供的 pid1.cpp 权威参数为准（X: kp=25 kd=25 predict=3 rate=0.3；Y: predict=0）
         float kp_x = 25.0f;                         // X 比例增益（P 控制）
         float kp_y = 25.0f;
-        float ki_x = 0.0f;                          // 预留（V1 纯 P，不使用）
-        float ki_y = 0.0f;
         float kd_x = 25.0f;                         // 微分增益（pid1 刹车，防过冲）
         float kd_y = 25.0f;
     // A10.1：FOV 角度换算模式（参考 PD Aim fov 算法，可选）
@@ -224,7 +219,6 @@ struct MouseProfile {
     float vfov = 53.0f;                         // 垂直视场角（度）
     float move_speed_x = 500.0f;                // X 每整圈移动像素（角度换算）
     float move_speed_y = 500.0f;                // Y 每整圈移动像素（角度换算）
-    int aim_part = 0;                           // 瞄准部位：0=脚 10=头（offset_y=1.0-ap*0.09）
     float rate_x = 0.3f;                        // 输出速率（X 独立；pid1 kp_gain_rate=0.3）
         float rate_y = 0.3f;
     float sensitivity = 1.0f;                   // 灵敏度
@@ -233,29 +227,16 @@ struct MouseProfile {
     // 输出换算：count = kp×err / gain（px → count 正确换算，防单位错乱过冲）。
     float gain_x_px_per_count = 0.65f;          // X 轴（标定测得；默认 0.65 近似）
     float gain_y_px_per_count = 0.65f;          // Y 轴
-    float response_delay_ms = 0.0f;             // 输入到画面反馈延迟
-    float smith_dead_ms = 28.4f;                 // Smith 在途窗口
-    float alpha = 0.8f;                          // α-β-γ 位置增益
-    float beta = 0.3f;
-    float gamma = 0.1f;
-    float predict_dt_ms = 50.0f;                 // 目标提前预测时间             // 输入→画面响应延迟（标定测得）
     float deadzone_x = 1.0f;                    // X 死区（count，|v|<dz → 0）
     float deadzone_y = 1.0f;
-    float smooth = 0.0f;                        // 平滑低通 alpha（0~1；0=关闭；TTBox 自实现）
     // controller 公式（kp×rate×err + predict×vel）与输出链参数
     float predict_x = 3.0f;                   // pid1 X 前馈 3.0（追左右移动目标）
         float predict_y = 0.0f;                   // pid1 Y 不带前馈（仅位置纠正）
     float smooth_x = 9900.0f;                   // smooth 参考值（9900≈不过滤；TTBox 用 smooth 0~1 兼容）
     float smooth_y = 9900.0f;
     float output_deadzone = 1.0f;               // output_deadzone（自适应死区基准）
-    float selector_search_radius = 170.0f;      // selector_search_radius
-    bool aim_fire_lock_y = false;               // 开火锁 Y
-    int y_axis_fire_hotkey = 0x01;              // 开火热键位掩码（1=left）
-    float y_axis_fire_release_delay_sec = 0.3f; // 开火锁 Y 释放延迟
-    // 插件配置（pull_curve / continuous_lead / humanize）
+    // 插件配置（pull_curve / recoil / personal_motion / personal_trajectory）
         PullCurveConfig pull_curve;
-        ContinuousLeadConfig continuous_lead;
-        HumanizeConfig humanize;
         PersonalMotionConfig personal_motion;
         PersonalTrajectoryConfig personal_trajectory;  // 拟人化整形引擎（Fitts 时长+包络+垂直抖动+自适应抑制+安全守卫）
     RecoilConfig recoil;                    // 压枪（输出链 pull_curve 后、deadzone 前注入 scaled_y）
@@ -266,8 +247,6 @@ struct MouseProfile {
     bool calibrating = false;                   // 标定模式（自瞄全程输出，用偏置测闭环响应）
     float calibration_bias_x = 0.0f;            // 标定偏置 px（加在参考点上，自瞄自动拉到该点）
     float calibration_bias_y = 0.0f;
-    bool block_physical_x = false;              // 瞄准时屏蔽物理 X
-    bool block_physical_y = false;              // 瞄准时屏蔽物理 Y
 };
 
 }  // namespace ttbox::core::aim

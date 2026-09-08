@@ -85,12 +85,10 @@ std::string obj_str(const JsonValue& o, const char* key, const std::string& def)
 bool RuntimeProfile::validate(std::string* error) const {
     // 非有限值总闸：JSON 1e999 等可产生 inf，NaN/inf 进入 PID 会输出乱飞（fail-closed 防线）。
     const float mouse_nums[] = {
-        mouse.kp_x, mouse.kp_y, mouse.ki_x, mouse.ki_y, mouse.kd_x, mouse.kd_y,
+        mouse.kp_x, mouse.kp_y, mouse.kd_x, mouse.kd_y,
         mouse.predict_x, mouse.predict_y, mouse.rate_x, mouse.rate_y,
-        mouse.smooth_x, mouse.smooth_y, mouse.smooth,
         mouse.fov_range, mouse.confidence, mouse.sensitivity, mouse.output_scale,
         mouse.deadzone_x, mouse.deadzone_y, mouse.output_deadzone,
-        mouse.selector_search_radius, mouse.lost_grace_ms,
         mouse.hfov, mouse.vfov, mouse.move_speed_x, mouse.move_speed_y,
         mouse.aim_point.aim_offset_x, mouse.aim_point.aim_offset_y,
         mouse.aim_point.offset_x, mouse.aim_point.offset_y,
@@ -155,19 +153,12 @@ bool RuntimeProfile::validate(std::string* error) const {
         if (error) *error = "mouse.move_speed 不能为负";
         return false;
     }
-    if (mouse.aim_part < 0 || mouse.aim_part > 10) {
-        if (error) *error = "mouse.aim_part 必须在 [0,10]";
-        return false;
-    }
     if (mouse.rate_x < 0.0f || mouse.rate_y < 0.0f ||
         mouse.sensitivity < 0.0f || mouse.output_scale < 0.0f) {
         if (error) *error = "mouse 输出系数不能为负";
         return false;
     }
-    if (mouse.smooth < 0.0f || mouse.smooth > 1.0f) {
-        if (error) *error = "mouse.smooth 必须在 [0,1]";
-        return false;
-    }
+
     if (mouse.lost_grace_ms < 0.0f) {
         if (error) *error = "mouse.lost_grace_ms 不能为负";
         return false;
@@ -242,17 +233,13 @@ JsonValue RuntimeProfile::to_json() const {
     // A10：鼠标 AI 注入配置
     JsonValue m = JsonValue::object();
     m.set("enabled", JsonValue::boolean(mouse.enabled));
-    m.set("proxy_mode", JsonValue::string(aim::mouse_proxy_mode_name(mouse.proxy_mode)));
     m.set("aim_hotkey", JsonValue::number(static_cast<double>(mouse.aim_hotkey)));
     m.set("aim_hotkey2", JsonValue::number(static_cast<double>(mouse.aim_hotkey2)));
     m.set("aim_hotkey_mode", JsonValue::string(aim::mouse_hotkey_mode_name(mouse.aim_hotkey_mode)));
     m.set("fov_range", JsonValue::number(static_cast<double>(mouse.fov_range)));
     m.set("confidence", JsonValue::number(static_cast<double>(mouse.confidence)));
-    m.set("prediction_s", JsonValue::number(static_cast<double>(mouse.prediction_s)));
     m.set("kp_x", JsonValue::number(static_cast<double>(mouse.kp_x)));
     m.set("kp_y", JsonValue::number(static_cast<double>(mouse.kp_y)));
-    m.set("ki_x", JsonValue::number(static_cast<double>(mouse.ki_x)));
-    m.set("ki_y", JsonValue::number(static_cast<double>(mouse.ki_y)));
     m.set("kd_x", JsonValue::number(static_cast<double>(mouse.kd_x)));
     m.set("kd_y", JsonValue::number(static_cast<double>(mouse.kd_y)));
     m.set("fov_mode", JsonValue::boolean(mouse.fov_mode));
@@ -260,45 +247,25 @@ JsonValue RuntimeProfile::to_json() const {
     m.set("vfov", JsonValue::number(static_cast<double>(mouse.vfov)));
     m.set("move_speed_x", JsonValue::number(static_cast<double>(mouse.move_speed_x)));
     m.set("move_speed_y", JsonValue::number(static_cast<double>(mouse.move_speed_y)));
-    m.set("aim_part", JsonValue::number(static_cast<double>(mouse.aim_part)));
     m.set("rate_x", JsonValue::number(static_cast<double>(mouse.rate_x)));
     m.set("rate_y", JsonValue::number(static_cast<double>(mouse.rate_y)));
     m.set("sensitivity", JsonValue::number(static_cast<double>(mouse.sensitivity)));
     m.set("output_scale", JsonValue::number(static_cast<double>(mouse.output_scale)));
     m.set("deadzone_x", JsonValue::number(static_cast<double>(mouse.deadzone_x)));
     m.set("deadzone_y", JsonValue::number(static_cast<double>(mouse.deadzone_y)));
-    m.set("smooth", JsonValue::number(static_cast<double>(mouse.smooth)));
     // 对齐参数
     m.set("predict_x", JsonValue::number(static_cast<double>(mouse.predict_x)));
     m.set("predict_y", JsonValue::number(static_cast<double>(mouse.predict_y)));
     m.set("smooth_x", JsonValue::number(static_cast<double>(mouse.smooth_x)));
     m.set("smooth_y", JsonValue::number(static_cast<double>(mouse.smooth_y)));
     m.set("output_deadzone", JsonValue::number(static_cast<double>(mouse.output_deadzone)));
-    m.set("selector_search_radius", JsonValue::number(static_cast<double>(mouse.selector_search_radius)));
-    m.set("aim_fire_lock_y", JsonValue::boolean(mouse.aim_fire_lock_y));
-    m.set("y_axis_fire_hotkey", JsonValue::number(static_cast<double>(mouse.y_axis_fire_hotkey)));
-    m.set("y_axis_fire_release_delay_sec", JsonValue::number(static_cast<double>(mouse.y_axis_fire_release_delay_sec)));
-    // 插件配置（pull_curve / continuous_lead / humanize）
+    // 插件配置（pull_curve / recoil / personal_motion / personal_trajectory）
     JsonValue pc = JsonValue::object();
     pc.set("enabled", JsonValue::boolean(mouse.pull_curve.enabled));
     pc.set("strength", JsonValue::number(static_cast<double>(mouse.pull_curve.strength)));
     pc.set("jitter_px", JsonValue::number(static_cast<double>(mouse.pull_curve.jitter_px)));
     pc.set("min_distance", JsonValue::number(static_cast<double>(mouse.pull_curve.min_distance)));
     m.set("pull_curve", std::move(pc));
-    JsonValue cl = JsonValue::object();
-    cl.set("enabled", JsonValue::boolean(mouse.continuous_lead.enabled));
-    cl.set("enter_distance", JsonValue::number(static_cast<double>(mouse.continuous_lead.enter_distance)));
-    cl.set("scale", JsonValue::number(static_cast<double>(mouse.continuous_lead.scale)));
-    cl.set("fade_in_ms", JsonValue::number(static_cast<double>(mouse.continuous_lead.fade_in_ms)));
-    cl.set("fade_out_ms", JsonValue::number(static_cast<double>(mouse.continuous_lead.fade_out_ms)));
-    cl.set("near_disable_ratio", JsonValue::number(static_cast<double>(mouse.continuous_lead.near_disable_ratio)));
-    m.set("continuous_lead", std::move(cl));
-    JsonValue hz = JsonValue::object();
-    hz.set("enabled", JsonValue::boolean(mouse.humanize.enabled));
-    hz.set("curve_strength", JsonValue::number(static_cast<double>(mouse.humanize.curve_strength)));
-    hz.set("jitter_px", JsonValue::number(static_cast<double>(mouse.humanize.jitter_px)));
-    hz.set("jitter_frequency", JsonValue::number(static_cast<double>(mouse.humanize.jitter_frequency)));
-    m.set("humanize", std::move(hz));
     JsonValue pm = JsonValue::object();
     pm.set("enabled", JsonValue::boolean(mouse.personal_motion.enabled));
     pm.set("curve_blend", JsonValue::number(static_cast<double>(mouse.personal_motion.curve_blend)));
@@ -379,8 +346,6 @@ JsonValue RuntimeProfile::to_json() const {
     // 与拟人化（response_px_per_count 同语义）都依赖此值，标定后必须落盘生效。
     m.set("gain_x_px_per_count", JsonValue::number(static_cast<double>(mouse.gain_x_px_per_count)));
     m.set("gain_y_px_per_count", JsonValue::number(static_cast<double>(mouse.gain_y_px_per_count)));
-    m.set("block_physical_x", JsonValue::boolean(mouse.block_physical_x));
-    m.set("block_physical_y", JsonValue::boolean(mouse.block_physical_y));
     JsonValue cos = JsonValue::array();
     for (const auto& c : mouse.aim_point.class_offsets) {
         JsonValue o = JsonValue::object();
@@ -449,17 +414,13 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
     // A10：鼠标 AI 注入配置
     if (const JsonValue* m = v.find("mouse"); m && m->is_object()) {
         p.mouse.enabled = obj_bool(*m, "enabled", false);
-        p.mouse.proxy_mode = aim::mouse_proxy_mode_from_string(obj_str(*m, "proxy_mode", "full_passthrough"));
         p.mouse.aim_hotkey = static_cast<uint8_t>(obj_int(*m, "aim_hotkey", 2));
         p.mouse.aim_hotkey2 = static_cast<uint8_t>(obj_int(*m, "aim_hotkey2", 0));
         p.mouse.aim_hotkey_mode = aim::mouse_hotkey_mode_from_string(obj_str(*m, "aim_hotkey_mode", "any").c_str());
         p.mouse.fov_range = static_cast<float>(obj_num(*m, "fov_range", 1.0));
         p.mouse.confidence = static_cast<float>(obj_num(*m, "confidence", 0.25));
-        p.mouse.prediction_s = static_cast<float>(obj_num(*m, "prediction_s", 0.0));
         p.mouse.kp_x = static_cast<float>(obj_num(*m, "kp_x", 25.0));
                 p.mouse.kp_y = static_cast<float>(obj_num(*m, "kp_y", 25.0));
-                p.mouse.ki_x = static_cast<float>(obj_num(*m, "ki_x", 0.0));
-                p.mouse.ki_y = static_cast<float>(obj_num(*m, "ki_y", 0.0));
                 p.mouse.kd_x = static_cast<float>(obj_num(*m, "kd_x", 25.0));
                 p.mouse.kd_y = static_cast<float>(obj_num(*m, "kd_y", 25.0));
         p.mouse.fov_mode = obj_bool(*m, "fov_mode", false);
@@ -467,44 +428,24 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
         p.mouse.vfov = static_cast<float>(obj_num(*m, "vfov", 53.0));
         p.mouse.move_speed_x = static_cast<float>(obj_num(*m, "move_speed_x", 500.0));
         p.mouse.move_speed_y = static_cast<float>(obj_num(*m, "move_speed_y", 500.0));
-        p.mouse.aim_part = static_cast<int>(obj_int(*m, "aim_part", 0));
         p.mouse.rate_x = static_cast<float>(obj_num(*m, "rate_x", 0.3));
                 p.mouse.rate_y = static_cast<float>(obj_num(*m, "rate_y", 0.3));
         p.mouse.sensitivity = static_cast<float>(obj_num(*m, "sensitivity", 1.0));
         p.mouse.output_scale = static_cast<float>(obj_num(*m, "output_scale", 1.0));
         p.mouse.deadzone_x = static_cast<float>(obj_num(*m, "deadzone_x", 1.0));
         p.mouse.deadzone_y = static_cast<float>(obj_num(*m, "deadzone_y", 1.0));
-        p.mouse.smooth = static_cast<float>(obj_num(*m, "smooth", 0.0));
         // 对齐参数
         p.mouse.predict_x = static_cast<float>(obj_num(*m, "predict_x", 3.0));
                 p.mouse.predict_y = static_cast<float>(obj_num(*m, "predict_y", 0.0));
         p.mouse.smooth_x = static_cast<float>(obj_num(*m, "smooth_x", 9900.0));
         p.mouse.smooth_y = static_cast<float>(obj_num(*m, "smooth_y", 9900.0));
         p.mouse.output_deadzone = static_cast<float>(obj_num(*m, "output_deadzone", 1.0));
-        p.mouse.selector_search_radius = static_cast<float>(obj_num(*m, "selector_search_radius", 170.0));
-        p.mouse.aim_fire_lock_y = obj_bool(*m, "aim_fire_lock_y", false);
-        p.mouse.y_axis_fire_hotkey = static_cast<int>(obj_int(*m, "y_axis_fire_hotkey", 1));
-        p.mouse.y_axis_fire_release_delay_sec = static_cast<float>(obj_num(*m, "y_axis_fire_release_delay_sec", 0.3));
-        // 插件配置（pull_curve / continuous_lead / humanize）
+    // 插件配置（pull_curve / recoil / personal_motion / personal_trajectory）
         if (const JsonValue* pc = m->find("pull_curve"); pc && pc->is_object()) {
             p.mouse.pull_curve.enabled = obj_bool(*pc, "enabled", true);
             p.mouse.pull_curve.strength = static_cast<float>(obj_num(*pc, "strength", 0.8));
             p.mouse.pull_curve.jitter_px = static_cast<float>(obj_num(*pc, "jitter_px", 3.0));
             p.mouse.pull_curve.min_distance = static_cast<float>(obj_num(*pc, "min_distance", 80.0));
-        }
-        if (const JsonValue* cl = m->find("continuous_lead"); cl && cl->is_object()) {
-            p.mouse.continuous_lead.enabled = obj_bool(*cl, "enabled", false);
-            p.mouse.continuous_lead.enter_distance = static_cast<float>(obj_num(*cl, "enter_distance", 150.0));
-            p.mouse.continuous_lead.scale = static_cast<float>(obj_num(*cl, "scale", 0.5));
-            p.mouse.continuous_lead.fade_in_ms = static_cast<float>(obj_num(*cl, "fade_in_ms", 300.0));
-            p.mouse.continuous_lead.fade_out_ms = static_cast<float>(obj_num(*cl, "fade_out_ms", 300.0));
-            p.mouse.continuous_lead.near_disable_ratio = static_cast<float>(obj_num(*cl, "near_disable_ratio", 0.66));
-        }
-        if (const JsonValue* hz = m->find("humanize"); hz && hz->is_object()) {
-            p.mouse.humanize.enabled = obj_bool(*hz, "enabled", true);
-            p.mouse.humanize.curve_strength = static_cast<float>(obj_num(*hz, "curve_strength", 0.45));
-            p.mouse.humanize.jitter_px = static_cast<float>(obj_num(*hz, "jitter_px", 0.25));
-            p.mouse.humanize.jitter_frequency = static_cast<float>(obj_num(*hz, "jitter_frequency", 8.0));
         }
         if (const JsonValue* pm = m->find("personal_motion"); pm && pm->is_object()) {
             p.mouse.personal_motion.enabled = obj_bool(*pm, "enabled", false);
@@ -591,8 +532,6 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
         p.mouse.calibration_bias_y = static_cast<float>(obj_num(*m, "calibration_bias_y", 0.0));
         p.mouse.gain_x_px_per_count = static_cast<float>(obj_num(*m, "gain_x_px_per_count", 0.65));
         p.mouse.gain_y_px_per_count = static_cast<float>(obj_num(*m, "gain_y_px_per_count", 0.65));
-        p.mouse.block_physical_x = obj_bool(*m, "block_physical_x", false);
-        p.mouse.block_physical_y = obj_bool(*m, "block_physical_y", false);
         if (const JsonValue* co = m->find("class_offsets"); co && co->is_array()) {
             for (const auto& e : co->as_array()) {
                 if (!e.is_object()) continue;

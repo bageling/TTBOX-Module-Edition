@@ -342,7 +342,6 @@ TEST(mouse_aim_state_hotkey_release) {
 TEST(mouse_runtime_profile_json_roundtrip) {
     RuntimeProfile p;
     p.mouse.enabled = true;
-    p.mouse.proxy_mode = aim::MouseProxyMode::kFullPassthrough;
     p.mouse.aim_hotkey = 0x02;
     p.mouse.fov_range = 0.41f;
     p.mouse.kp_x = 17.0f;
@@ -351,18 +350,15 @@ TEST(mouse_runtime_profile_json_roundtrip) {
     p.mouse.rate_y = 0.3f;
     p.mouse.output_scale = 1.0f;
     p.mouse.deadzone_x = 1.0f;
-    p.mouse.smooth = 0.2f;
     p.mouse.lost_grace_ms = 78.0f;
     p.mouse.gain_x_px_per_count = 0.42f;   // 自动标定产物（px/count）必须落盘生效
     p.mouse.gain_y_px_per_count = 0.71f;
-    p.mouse.block_physical_x = true;
     p.mouse.aim_point.aim_offset_x = 12.0f;
     p.mouse.fov_mode = true;
     p.mouse.hfov = 90.0f;
     p.mouse.vfov = 60.0f;
     p.mouse.move_speed_x = 700.0f;
     p.mouse.move_speed_y = 650.0f;
-    p.mouse.aim_part = 1;
     aim::ClassOffset co;
     co.class_id = 0; co.offset_x = 0.48f; co.offset_y = 0.49f; co.priority = 0;
     p.mouse.aim_point.class_offsets.push_back(co);
@@ -370,7 +366,6 @@ TEST(mouse_runtime_profile_json_roundtrip) {
     const JsonValue j = p.to_json();
     RuntimeProfile q = RuntimeProfile::from_json(j);
     CHECK(q.mouse.enabled);
-    CHECK(q.mouse.proxy_mode == aim::MouseProxyMode::kFullPassthrough);
     CHECK_EQ(q.mouse.aim_hotkey, 0x02u);
     CHECK(q.mouse.fov_range == 0.41f);
     CHECK(q.mouse.kp_x == 17.0f);
@@ -378,18 +373,15 @@ TEST(mouse_runtime_profile_json_roundtrip) {
     CHECK(q.mouse.rate_x == 0.4f);
     CHECK(q.mouse.output_scale == 1.0f);
     CHECK(q.mouse.deadzone_x == 1.0f);
-    CHECK(q.mouse.smooth == 0.2f);
     CHECK(q.mouse.lost_grace_ms == 78.0f);
     CHECK(q.mouse.gain_x_px_per_count == 0.42f);
     CHECK(q.mouse.gain_y_px_per_count == 0.71f);
-    CHECK(q.mouse.block_physical_x);
     CHECK(q.mouse.aim_point.aim_offset_x == 12.0f);
     CHECK(q.mouse.fov_mode);
     CHECK(q.mouse.hfov == 90.0f);
     CHECK(q.mouse.vfov == 60.0f);
     CHECK(q.mouse.move_speed_x == 700.0f);
     CHECK(q.mouse.move_speed_y == 650.0f);
-    CHECK_EQ(q.mouse.aim_part, 1);
     CHECK_EQ(q.mouse.aim_point.class_offsets.size(), 1u);
     CHECK(q.mouse.aim_point.class_offsets[0].offset_y == 0.49f);
     // validate 通过（合法配置）
@@ -514,7 +506,7 @@ TEST(mouse_yu_humanize_adds_jitter_only_when_enabled) {
 }
 
 // ---------------------------------------------------------------------------
-// RuntimeProfile mouse 段序列化（predict/插件/自适应死区参数）
+// RuntimeProfile mouse 段序列化（对齐参数/自适应死区/拉枪插件）
 // ---------------------------------------------------------------------------
 TEST(mouse_profile_yu_fields_roundtrip) {
     RuntimeProfile p;
@@ -523,19 +515,10 @@ TEST(mouse_profile_yu_fields_roundtrip) {
     p.mouse.smooth_x = 5000.0f;
     p.mouse.smooth_y = 4000.0f;
     p.mouse.output_deadzone = 1.5f;
-    p.mouse.selector_search_radius = 200.0f;
-    p.mouse.aim_fire_lock_y = true;
-    p.mouse.y_axis_fire_hotkey = 2;
-    p.mouse.y_axis_fire_release_delay_sec = 0.25f;
     p.mouse.pull_curve.enabled = true;
     p.mouse.pull_curve.strength = 0.9f;
     p.mouse.pull_curve.jitter_px = 2.5f;
     p.mouse.pull_curve.min_distance = 100.0f;
-    p.mouse.continuous_lead.enabled = true;
-    p.mouse.continuous_lead.enter_distance = 160.0f;
-    p.mouse.continuous_lead.scale = 0.6f;
-    p.mouse.humanize.enabled = false;
-    p.mouse.humanize.jitter_px = 0.1f;
 
     const JsonValue j = p.to_json();
     const RuntimeProfile q = RuntimeProfile::from_json(j);
@@ -543,16 +526,8 @@ TEST(mouse_profile_yu_fields_roundtrip) {
     CHECK(q.mouse.predict_y == 0.7f);
     CHECK(q.mouse.smooth_x == 5000.0f);
     CHECK(q.mouse.output_deadzone == 1.5f);
-    CHECK(q.mouse.selector_search_radius == 200.0f);
-    CHECK(q.mouse.aim_fire_lock_y);
-    CHECK_EQ(q.mouse.y_axis_fire_hotkey, 2);
-    CHECK(q.mouse.y_axis_fire_release_delay_sec == 0.25f);
     CHECK(q.mouse.pull_curve.enabled);
     CHECK(q.mouse.pull_curve.strength == 0.9f);
     CHECK(q.mouse.pull_curve.min_distance == 100.0f);
-    CHECK(q.mouse.continuous_lead.enabled);
-    CHECK(q.mouse.continuous_lead.enter_distance == 160.0f);
-    CHECK(!q.mouse.humanize.enabled);
-    CHECK(q.mouse.humanize.jitter_px == 0.1f);
 }
 
