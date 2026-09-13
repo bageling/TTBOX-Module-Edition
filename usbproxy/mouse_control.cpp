@@ -410,9 +410,9 @@ void* event_listen_loop(void* arg) {
 }
 
 int create_listen_socket(const char* path) {
-    // Do not unlink a socket that is already being served.  YU and TTBOX use
-    // compatible socket names on some boards; replacing a live socket here
-    // would silently steal the other system's mouse-control channel.
+    // Do not unlink a socket that is already being served.  Compatible socket
+    // names are shared on some boards; replacing a live socket here would
+    // silently steal another active mouse-control channel.
     if (::access(path, F_OK) == 0) {
         int probe = ::socket(AF_UNIX, SOCK_SEQPACKET, 0);
         if (probe >= 0) {

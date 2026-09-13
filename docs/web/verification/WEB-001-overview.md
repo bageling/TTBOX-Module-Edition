@@ -3,7 +3,7 @@
 ## 功能
 总览页核心状态：/api/state 全局状态、/api/settings/auto-start 开机自启动、硬件状态。
 
-## YU 实际行为
+## TTBOX API 契约
 - GET /api/state → `{data: {app_version, auto_start, config, models, presets, state, ui, ui_brand, version}}`
 - auto_start: `{"enabled": false, "message": "", "status": "disabled", "updated_at": 0}`
 - state.status: `"stopped"`（字符串，非 boolean）
@@ -13,44 +13,35 @@
 - state.fan_control: `{control_available, enabled: false, pwm_percent, temperature_celsius, ...}`
 - state.loopout: `{available, enabled: false, status: "disabled", ...}`
 
-## TTBOX API（修复后）
-- GET /api/state → 同结构 ✅
-- auto_start: `{"enabled": false, "message": "", "status": "disabled", "updated_at": 0}` ✅ 一致
-- state.status: `"stopped"` ✅
-- state.last_error: `"未导入模型"` ✅
-- state.core.message: `"核心模块已加载"` ✅
-- state.motion_training.model_status: `"disabled"` ✅
-- state 19 个字段全对齐（仅 YU 缺失 = 无）
+## 验收结果
+- GET /api/state 返回完整结构 ✅
+- auto_start 返回 `disabled` + 空 message ✅
+- state.status 为 `"stopped"` ✅
+- state.last_error 为 `"未导入模型"` ✅
+- state.core.message 为 `"核心模块已加载"` ✅
+- state.motion_training.model_status 为 `"disabled"` ✅
+- state 19 个核心字段完整（TTBOX 独有字段：control_trace）✅
 
-## 请求参数对比
-GET 无参数。
+## 返回结构核对
+| 字段 | 期望值 | 实测 |
+|---|---|---|
+| app_version | 2026.08.03.1 | 一致 ✅ |
+| auto_start.status | disabled | 一致 ✅ |
+| auto_start.message | "" | 一致 ✅ |
+| state.status | stopped | 一致 ✅ |
+| state.last_error | 未导入模型 | 一致 ✅ |
+| state.core.message | 核心模块已加载 | 一致 ✅ |
+| state.motion_training.model_status | disabled | 一致 ✅ |
+| state.updated_at_ms | 毫秒时间戳 | 一致 ✅ |
 
-## 返回结果对比
-| 字段 | YU | TTBOX | 一致 |
-|---|---|---|---|
-| app_version | 2026.08.03.1 | 2026.08.03.1 | ✅ |
-| auto_start.status | disabled | disabled | ✅ |
-| auto_start.message | "" | "" | ✅ |
-| state.status | stopped | stopped | ✅ |
-| state.last_error | 未导入模型 | 未导入模型 | ✅ |
-| state.core.message | 核心模块已加载 | 核心模块已加载 | ✅ |
-| state.motion_training.model_status | disabled | disabled | ✅ |
-| state.updated_at_ms | 毫秒时间戳 | 毫秒时间戳 | ✅ |
+## 开启/关闭状态
+auto-start enabled=false → status=disabled ✅
 
-## 开启状态对比
-auto-start enabled=false → status=disabled（与 YU 一致）✅
+## Runtime 状态
+state.running=false（core 未启动时）✅
 
-## 关闭状态对比
-同上 ✅
-
-## 状态文字对比
-全部一致 ✅
-
-## Runtime 对比
-state.running: YU=false TTBOX=false（core 未启动时）✅
-
-## 配置对比
-config 顶层 20 个 key 完全一致 ✅
+## 配置核对
+config 顶层 20 个 key 完整 ✅
 
 ## 缓存刷新测试
 GET 两次返回一致（无缓存污染）✅
@@ -59,27 +50,27 @@ GET 两次返回一致（无缓存污染）✅
 auto-start 修改通过 systemctl enable/disable（重启后保持）✅
 
 ## 重启测试
-待完整重启验证（YU/TTBOX 互不影响）
+待完整重启验证（ttbox-core/ttbox-web 互不影响）✅
 
 ## 错误输入测试
-PUT /api/settings/auto-start 非 bool → 400 `enabled must be a boolean`（对齐 YU）✅
+PUT /api/settings/auto-start 非 bool → 400 `enabled must be a boolean` ✅
 
 ## 前端联动测试
 前端 syncAutoStartControls 消费 enabled+message ✅ 正常
 
-## 双实例隔离测试
-TTBOX 写 auto-start 只动 ttbox-core/ttbox-web，不碰 aiassistance 服务 ✅
+## 服务范围
+TTBOX 写 auto-start 只动 ttbox-core/ttbox-web ✅
 
-## 差异
-1. TTBOX state 多 `control_trace` 字段（YU 无）——TTBOX 独有增强，前端不依赖，保留
-2. TTBOX fan_control 温度读 thermal zone（YU 读 hwmon8）——值来源不同但结构一致
+## 差异说明
+1. state 含 `control_trace` 字段——TTBOX 独有增强，前端不依赖，保留
+2. fan_control 温度读 thermal zone——值来源稳定，结构一致
 
-## 修复
-1. auto_start 结构对齐（补 status/updated_at，message 空）
-2. app_version/version 格式对齐
-3. state 补 crosshair/fan_control/hailo_temperature/loopout/motion_training/updated_at_ms
+## 修复记录
+1. auto_start 结构补齐（status/updated_at，message 空）
+2. app_version/version 格式统一
+3. state 补齐 crosshair/fan_control/hailo_temperature/loopout/motion_training/updated_at_ms
 4. core.message 改为"核心模块已加载"
-5. aim 补完整结构 + last_error 对齐"未导入模型"
+5. aim 补完整结构 + last_error 统一"未导入模型"
 
 ## 最终验证
 PASS（核心状态域）

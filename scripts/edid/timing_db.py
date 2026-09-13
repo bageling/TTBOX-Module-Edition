@@ -84,7 +84,7 @@ TIMING_1080P120 = DisplayTiming(1920, 1080, 120.0, 297.0, 88, 44, 148, 4, 5, 36)
 TIMING_1080P144 = DisplayTiming(1920, 1080, 144.0, 348.941, 48, 32, 80, 3, 5, 77)
 TIMING_1080P240 = DisplayTiming(1920, 1080, 240.0, 594.0, 88, 44, 148, 4, 5, 36, h_pol=False, v_pol=False)
 
-# 2K 模式像素时钟必须用 VESA/YU 标准值（此前 CVT-RB 近似值偏低 3-5%，
+# 2K 模式像素时钟必须用 VESA 标准值（此前 CVT-RB 近似值偏低 3-5%，
 # PC 显卡模式库无法匹配 → 拒绝 2K → fallback 1080p，即"1K 能注入 2K 注入不了"）
 TIMING_1440P60 = DisplayTiming(2560, 1440, 60.0, 248.87, 48, 32, 80, 3, 5, 77)
 TIMING_1440P120 = DisplayTiming(2560, 1440, 120.0, 497.75, 48, 32, 80, 3, 5, 77)
@@ -109,7 +109,7 @@ TIMING_MAP = {
     "2160p60": TIMING_4K60,
 }
 
-# 安全模式表（对齐 yu safe_modes: token, w, h, refresh, pixel_clock_khz）
+# 安全模式表（token, w, h, refresh, pixel_clock_khz）
 SAFE_MODES = [
     ("2160p60", 3840, 2160, 60, 594000),
     ("1440p144", 2560, 1440, 144, 586345),
@@ -121,12 +121,12 @@ SAFE_MODES = [
     ("1080p60compat", 1920, 1080, 60, 145392),
 ]
 
-# 动态模式正则（对齐 yu）
+# 动态模式正则
 DYNAMIC_MODE_RE = None
 
 
 def reduced_blanking_pixel_clock_khz(width, height, refresh):
-    """CVT-RB 像素时钟估算（对齐 yu 公式）。"""
+    """CVT-RB 像素时钟估算（VESA CVT-RB 公式）。"""
     if width <= 0 or height <= 0 or refresh <= 0:
         return 0
     return ((width + 48 + 32 + 80) * (height + 3 + 5 + 77) * refresh + 500) // 1000

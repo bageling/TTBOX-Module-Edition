@@ -84,7 +84,7 @@ std::vector<TargetSelector::Candidate> TargetSelector::collect_candidates(
             t.kx = ncx; t.ky = ncy; t.kw = nw; t.kh = nh;
             t.vx = t.vy = t.vw = t.vh = 0.0f;
         } else {
-            // 用"预更新前的 innovation"学习速度（对齐 VisionForge：旧代码先纠正再取差导致速度为0）
+            // 用"预更新前的 innovation"学习速度（旧代码先纠正再取差导致速度为 0）
             t.vx += (ncx - t.kx) * g;
             t.vy += (ncy - t.ky) * g;
             t.vw += (nw - t.kw) * g;

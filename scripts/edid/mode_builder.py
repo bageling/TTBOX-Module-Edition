@@ -1,4 +1,4 @@
-"""TTBOX EDID 模式构建器 — 对齐 yu apply_display_edid.sh 的核心逻辑。
+"""TTBOX EDID 模式构建器 — TTBOX EDID 注入脚本的核心逻辑。
 
 包含：
   build_display_mode_tokens_for_config(config, monitor)
@@ -74,7 +74,7 @@ def _available_tokens_for_monitor(monitor):
 
 
 def build_display_mode_tokens_for_config(config, monitor):
-    """根据配置 + 显示器构建模式 token 列表（对齐 yu 核心逻辑）。"""
+    """根据配置 + 显示器构建模式 token 列表（TTBOX 核心逻辑）。"""
     requested_native = config.get("native_mode", "")
     native_only = _bool_value(config.get("native_only"), False)
 
@@ -159,7 +159,7 @@ def apply_real_monitor_to_config(config):
 
 
 def load_config(config_path="/opt/ttbox/config/hardware_display.json"):
-    """读取并校验配置（对齐 yu load_config：白名单校验）。"""
+    """读取并校验配置（白名单校验）。"""
     import json
     config = {}
     try:

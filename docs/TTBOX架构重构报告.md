@@ -208,7 +208,7 @@ core/src/main.cpp
 - `core/src/ipc/IpcServer.hpp/.cpp`
 - `platform/*`
 - `release/*`
-- `yu-backend/*`
+- 历史重复后端快照
 - `web/*`
 - `scripts/*` 中部署、调试、EDID、授权和管理脚本
 - `core/src/auth/*`
@@ -260,9 +260,9 @@ core/src/main.cpp
 
 ### 5. 源码副本重复
 
-`yu-backend/yu-core-src/core` 与根目录 `core` 存在大量字节级完全相同文件，包括测试、模型、采集、坐标、输出和 Web 工具。
+历史重复 Core 副本与根目录 `core` 存在大量字节级完全相同文件，包括测试、模型、采集、坐标、输出和 Web 工具。
 
-**处理**：根目录 `core` 是唯一施工与构建源；`yu-backend/yu-core-src` 作为历史/打包输入冻结，不纳入根 CMake 构建，不在本阶段机械删除，后续单独制定清理迁移步骤。
+**处理**：根目录 `core` 是唯一施工与构建源；历史重复后端快照作为历史/打包输入冻结，不纳入根 CMake 构建，不在本阶段机械删除，后续单独制定清理迁移步骤。
 
 ## 五、保留、合并、删除、冻结
 
@@ -289,7 +289,7 @@ core/src/main.cpp
 
 - `ttbox-infer.sh` 对 `test_worker_hw` 的旧生产包装。
 - `active_model.txt`、`infer.json` 生产依赖。
-- `yu-backend/yu-core-src/core` 的重复源码副本。
+- 历史重复 Core 源码副本。
 - 已被统一 OutputBackend 取代且无真实调用点的旧输出实现。
 - 仅部署脚本引用、当前 CMake 不构建的旧测试/二进制入口。
 
@@ -297,7 +297,7 @@ core/src/main.cpp
 
 - `platform/*` supervisor/生命周期：只做管理，不改成新的 Runtime。
 - `scripts/*` 部署、EDID、授权、调试脚本：只记录调用关系，不纳入主链重构。
-- `yu-backend/*`：作为兼容/历史集成层，不作为唯一 Core 源。
+- 历史重复后端快照：作为历史集成层，不作为唯一 Core 源。
 - 真实 HID 注入：阶段一和阶段二保持关闭。
 - RKNN 三核并发策略：先保留现有实现，等板端采集和单 Worker 链路证据完整后再调整。
 
@@ -354,12 +354,12 @@ MouseOutput（Null/Trace 默认；HID/USB Proxy 显式启用）
 | 鼠标最终从哪里输出？ | `OutputBackend` 选择 Local HID/USB Proxy，或旧 Aibox/FIFO 后端 | 多实现 |
 | 唯一生产入口是什么？ | 设计上是 `core/src/main.cpp`；服务文件存在冲突，需清理确认 | 当前候选 |
 | 唯一模型真相是什么？ | 当前没有唯一真相；ModelRegistry 与旧文件并存 | 未完成 |
-| 哪些旧代码退出生产链？ | `test_worker_hw` 包装、`active_model.txt`/`infer.json` 回退、重复 `yu-backend/yu-core-src`、未接线旧输出 | 待实施 |
+| 哪些旧代码退出生产链？ | `test_worker_hw` 包装、`active_model.txt`/`infer.json` 回退、重复历史 Core 副本、未接线旧输出 | 待实施 |
 
 ## 九、当前验证结果
 
 - Windows CMake 配置：**通过**。已生成 `core/build`，MSVC 2022，C++ 工具链可用。
-- 完整 `pytest -q`：**失败于收集阶段**。原因包括仓库目录 `platform` 与 Python 标准库同名导致 `platform.tests` 导入冲突，以及 `yu-backend/ipc_test.py` 在 Windows 缺少 `socket.AF_UNIX`。这属于测试配置/平台兼容问题，不代表核心逻辑测试结果。
+- 完整 `pytest -q`：**失败于收集阶段**。原因包括仓库目录 `platform` 与 Python 标准库同名导致 `platform.tests` 导入冲突，以及历史后端 `ipc_test.py` 在 Windows 缺少 `socket.AF_UNIX`。这属于测试配置/平台兼容问题，不代表核心逻辑测试结果。
 - C++ 编译：**通过**，命令为 `cmake --build core/build --config Release --parallel 4`，退出码 0。
 - CTest：**14/14 通过**，命令为 `ctest --test-dir core/build -C Release --output-on-failure`。
 - RK3588 V4L2/RGA/RKNN/HID：当前工作机未具备目标板设备，**板端未验证**。

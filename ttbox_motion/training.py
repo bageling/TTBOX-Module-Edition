@@ -129,7 +129,7 @@ class MotionProfileStore:
     def _read(self, profile_id: str) -> dict[str, Any]:
         path = self._path(profile_id)
         if not path.exists():
-            # 对齐 YU：报具体路径错误（failed to open <path>）
+            # 报具体路径错误（failed to open <path>）
             raise MotionTrainingError(f"failed to open {path}")
         try:
             return json.loads(path.read_text(encoding="utf-8"))

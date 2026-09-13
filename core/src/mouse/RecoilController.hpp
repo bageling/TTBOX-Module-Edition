@@ -9,9 +9,9 @@
 //   算出的 y 压枪量（count）由 AimThread 注入自身输出链
 //   （pull_curve 之后、deadzone 之前，与 PID 输出融合），
 //   之后统一走 deadzone → remainder → int16 → 拟人化整形 → 热键安全门。
-//   与 YU 的独立 recoil 链路不同：这里所有输出都受 TTBOX 安全边界约束。
+//   与独立 recoil 链路不同：这里所有输出都受 TTBOX 安全边界约束。
 //
-// 行为（对齐 YU 压枪模块，参数语义一致）：
+// 行为（对齐 TTBOX 压枪模块，参数语义一致）：
 //   1. 热键按住（hotkey/hotkey2，any=任一 / all=同时）才开始计时
 //   2. trigger_delay_ms：按住超过该时长才压（防单点误触），松开重新计时
 //   3. only_when_target_visible：有目标才压；目标丢失后 target_lost_release_ms 内继续压（保持窗口）
@@ -111,7 +111,7 @@ inline RecoilController::RecoilDelta RecoilController::update(
     else target_lost_ms_ += dt_ms;
 
     // 目标丢失保持窗口：仅当"曾经见过目标"时，丢失 target_lost_release_ms 内仍压。
-    // （从未见过目标 → 窗口无效，防空压；YU 语义一致）
+    // （从未见过目标 → 窗口无效，防空压；压枪语义一致）
     if (cfg.only_when_target_visible && !target_visible && had_target_) {
         const float keep_ms = (cfg.target_lost_release_ms >= 0.0f) ? cfg.target_lost_release_ms : 0.0f;
         target_ok = target_lost_ms_ <= keep_ms;

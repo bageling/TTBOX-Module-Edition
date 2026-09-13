@@ -121,7 +121,7 @@ systemctl is-active ttbox-core ttbox-web ttbox-preview ttbox-usbproxy
 └── src/core/                   源码和构建目录
 ```
 
-> 板端还有一套 YU 系统（`/opt/aiassistance`），和 TTBOX 完全隔离。**只准动 `/opt/ttbox`，不要碰 `/opt/aiassistance`。**
+> 板端只运行 TTBOX 自己的服务和 `/opt/ttbox` 目录，所有操作都以 TTBOX 为准。
 
 ---
 
@@ -330,8 +330,8 @@ python3 /opt/ttbox/src/core/tests/usbproxy_buttontest.py
 **模型库选项乱跳？**
 不要手动改 `model_id` 配置。模型切换只走网页模型库或 `/api/models/select` 接口。
 
-**板端有两套系统？**
-是的。YU 在 `/opt/aiassistance`，TTBOX 在 `/opt/ttbox`，完全隔离。TTBOX 一切操作都在 `/opt/ttbox` 内。
+**板端文件装在哪个目录？**
+TTBOX 的一切代码、配置、模型和运行状态都在 `/opt/ttbox` 内，不依赖其它目录。
 
 ---
 

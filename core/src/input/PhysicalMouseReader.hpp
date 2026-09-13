@@ -17,7 +17,7 @@ public:
     bool running() const{return running_.load();}
     std::atomic<uint16_t>* button_source(){return &buttons_;}
     std::string device() const{return device_;}
-    // usb-proxy 按键事件通道。默认使用 TTBOX 自己的运行目录，避免读到 YU 的 event.sock。
+    // usb-proxy 按键事件通道。默认使用 TTBOX 自己的运行目录，避免读到其它服务的 event.sock。
     void set_event_socket_path(const std::string& path){ if(!path.empty()) event_socket_path_=path; }
 private:
     void loop();

@@ -48,7 +48,7 @@
 
 - 本地 `core/build` 不存在。
 - Windows 本机没有 `g++`。
-- 全量 `pytest -q` 被仓库目录 `platform` 遮蔽 Python 标准库，并误收集 Unix-only `yu-backend/ipc_test.py`；该结果标记为测试环境问题，未修改业务代码。
+- 全量 `pytest -q` 被仓库目录 `platform` 遮蔽 Python 标准库，并误收集 Unix-only 历史后端 `ipc_test.py`；该结果标记为测试环境问题，未修改业务代码。
 - Web Python/JS 语法通过。
 
 ## 本轮文件

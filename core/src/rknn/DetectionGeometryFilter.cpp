@@ -1,4 +1,4 @@
-// DetectionGeometryFilter.cpp — VisionForge 头身几何过滤与置信度分层
+// DetectionGeometryFilter.cpp — 头身几何过滤与置信度分层
 #include "rknn/DetectionGeometryFilter.hpp"
 #include <algorithm>
 #include <cmath>

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""TTBOX RK3588 HDMI-RX EDID 工具，完全独立于 YU。"""
+"""TTBOX RK3588 HDMI-RX EDID 工具。"""
 import argparse
 import os
 import struct
@@ -184,7 +184,7 @@ def cmd_builtin(version):
 
 
 def main():
-    parser = argparse.ArgumentParser(prog="hdmirx_edid.py", description="TTBOX EDID 工具（独立于 YU）")
+    parser = argparse.ArgumentParser(prog="hdmirx_edid.py", description="TTBOX EDID 工具")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--list", action="store_true")
     group.add_argument("--status", action="store_true")

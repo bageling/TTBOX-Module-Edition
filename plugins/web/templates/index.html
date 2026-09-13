@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>{{ app_title }}</title>
   {% block page_styles %}
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v={{ asset_version }}-preset-rename-v1-model-import-preset-v1-yu-fan-system-card-v3-auto-calibration-v4-manual-values-v1-physical-button-block-v3-compact-page-head-v4-overview-layout-v4-back-flick-class-v1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v={{ asset_version }}-preset-rename-v1-model-import-preset-v1-ttbox-fan-system-card-v3-auto-calibration-v4-manual-values-v1-physical-button-block-v3-compact-page-head-v4-overview-layout-v4-back-flick-class-v1">
   {% if motion_training_available is not defined or motion_training_available %}
   <link rel="stylesheet" href="{{ url_for('static', filename='motion_training.css') }}?v={{ asset_version }}-v7">
   {% endif %}
@@ -184,7 +184,7 @@
             <section class="overview-controls" aria-label="基础检测设置">
               <div class="slider-field crop-size-field">
                 <div class="label-row">
-                  <label for="capture_crop_size">{{ "模型规格" if ui_brand == "xh" else "截取尺寸" }}</label>
+                  <label for="capture_crop_size">截取尺寸</label>
                   <input id="capture_crop_size" data-config class="value-input" type="number" min="1" max="1080" step="1" inputmode="numeric">
                 </div>
                 <input id="capture_crop_size_range" class="crop-size-preset-range" type="range" min="0" max="4" step="1" aria-label="截取尺寸预设">
@@ -199,31 +199,31 @@
 
               <div class="slider-field">
                 <div class="label-row">
-                  <label for="range_factor_range">{{ "范围大小" if ui_brand == "xh" else "FOV 半径" }}</label>
+                  <label for="range_factor_range">FOV 半径</label>
                   <input id="range_factor" data-config class="value-input" type="number" min="0" max="1" step="0.01">
                 </div>
                 <input id="range_factor_range" type="range" min="0" max="1" step="0.01">
               </div>
 
-              <label class="field overview-field xh-hidden-offset-field">{{ "X轴偏移" if ui_brand == "xh" else "截取位置 X轴偏移" }}
+              <label class="field overview-field hidden-offset-field">截取位置 X轴偏移
                 <input id="capture_crop_offset_x" data-config class="value-input" type="number" min="-150" max="150" step="1">
               </label>
 
-              <label class="field overview-field xh-hidden-offset-field">{{ "Y轴偏移" if ui_brand == "xh" else "截取位置 Y轴偏移" }}
+              <label class="field overview-field hidden-offset-field">截取位置 Y轴偏移
                 <input id="capture_crop_offset_y" data-config class="value-input" type="number" min="-150" max="150" step="1">
               </label>
 
-              <label class="field overview-field xh-hidden-offset-field">{{ "X轴偏移" if ui_brand == "xh" else "瞄准点 X轴偏移" }}
+              <label class="field overview-field hidden-offset-field">瞄准点 X轴偏移
                 <input id="controller_aim_reference_offset_x" data-config class="value-input" type="number" min="-160" max="160" step="1">
               </label>
 
-              <label class="field overview-field xh-hidden-offset-field">{{ "Y轴偏移" if ui_brand == "xh" else "瞄准点 Y轴偏移" }}
+              <label class="field overview-field hidden-offset-field">瞄准点 Y轴偏移
                 <input id="controller_aim_reference_offset_y" data-config class="value-input" type="number" min="-160" max="160" step="1">
               </label>
 
               <div class="slider-field">
                 <div class="label-row">
-                  <label for="video_detection_confidence_range">{{ "置信度" if ui_brand == "xh" else "目标置信度" }}</label>
+                  <label for="video_detection_confidence_range">目标置信度</label>
                   <input id="video_detection_confidence" data-config class="value-input" type="number" min="0" max="1" step="0.01">
                 </div>
                 <input id="video_detection_confidence_range" type="range" min="0" max="1" step="0.01">
@@ -231,7 +231,7 @@
 
               <div class="slider-field">
                 <div class="label-row">
-                  <label for="video_detection_iou_range">{{ "重叠过滤" if ui_brand == "xh" else "重叠过滤 IoU" }}</label>
+                  <label for="video_detection_iou_range">重叠过滤 IoU</label>
                   <input id="video_detection_iou" data-config class="value-input" type="number" min="0" max="1" step="0.01">
                 </div>
                 <input id="video_detection_iou_range" type="range" min="0" max="1" step="0.01">
@@ -287,8 +287,8 @@
         <section id="control-page" class="page-card" data-page>
           <div class="page-head movement-control-head">
             <div>
-              <p>{{ "PID设置" if ui_brand == "xh" else "移动控制" }}</p>
-              <h2>{{ "PID设置" if ui_brand == "xh" else "移动控制" }}</h2>
+              <p>移动控制</p>
+              <h2>移动控制</h2>
             </div>
             <div class="diagnostic-actions">
               <button id="resetControllerDefaultsButton" class="ghost-button" type="button" hidden>恢复本页默认值</button>
@@ -299,7 +299,7 @@
             </div>
           </div>
 
-          <nav class="control-section-tabs" aria-label="{{ 'PID设置分区' if ui_brand == 'xh' else '移动控制分区' }}">
+          <nav class="control-section-tabs" aria-label="移动控制分区">
             <button id="controlSectionTabAutoCalibration" class="control-section-tab is-active" type="button" data-control-section-target="control-section-auto-calibration" aria-selected="true">
               <span>01</span>自动标定
             </button>
@@ -471,15 +471,15 @@
         <section id="assist-page" class="page-card" data-page>
           <div class="page-head assist-page-head mobile-action-head">
             <div>
-              <p>{{ "自定义设置" if ui_brand == "xh" else "辅助功能" }}</p>
-              <h2>{{ "自定义设置" if ui_brand == "xh" else "辅助功能" }}</h2>
+              <p>辅助功能</p>
+              <h2>辅助功能</h2>
             </div>
             <div class="diagnostic-actions">
               <button id="resetAssistDefaultsButton" class="ghost-button" type="button">恢复本页默认值</button>
             </div>
           </div>
 
-          <nav class="control-section-tabs assist-section-tabs" aria-label="{{ '自定义设置分区' if ui_brand == 'xh' else '辅助功能分区' }}">
+          <nav class="control-section-tabs assist-section-tabs" aria-label="辅助功能分区">
             <button id="assistSectionTabRecoil" class="control-section-tab is-active" type="button" data-assist-section-target="assist-section-recoil" aria-selected="true">
               <span>01</span>压枪
             </button>
@@ -495,11 +495,6 @@
             <button id="assistSectionTabCrosshair" class="control-section-tab" type="button" data-assist-section-target="assist-section-crosshair" aria-selected="false">
               <span>05</span>准星找色
             </button>
-            {% if ui_brand == "xh" %}
-              <button id="assistSectionTabFan" class="control-section-tab" type="button" data-assist-section-target="fan-page" aria-selected="false">
-                <span>06</span>风扇设置
-              </button>
-            {% endif %}
           </nav>
 
           <div class="assist-section-stack">
@@ -1283,35 +1278,6 @@
           </div>
         </section>
 
-        {% if ui_brand == "yu" %}
-        <section id="theme-store-page" class="page-card" data-page hidden>
-          <div class="page-head mobile-action-head">
-            <div>
-              <p>视觉主题</p>
-              <h2>主题商店</h2>
-            </div>
-            <div class="theme-store-head-actions">
-              <a id="purchaseThemesButton" class="button-link theme-purchase-button" target="_blank" rel="noopener noreferrer" hidden>去购买</a>
-              <button id="refreshThemesButton" class="ghost-button" type="button">刷新主题</button>
-            </div>
-          </div>
-          <div id="themeStoreStatus" class="theme-store-status" role="status">正在读取主题目录</div>
-          <div id="themeCardList" class="theme-card-list" aria-live="polite"></div>
-        </section>
-
-        <div id="themePreviewDialog" class="modal-backdrop" hidden>
-          <div class="modal-card theme-preview-modal" role="dialog" aria-modal="true" aria-labelledby="themePreviewTitle">
-            <div class="modal-head">
-              <div><p>主题预览</p><h3 id="themePreviewTitle">主题预览</h3></div>
-              <button id="closeThemePreviewButton" class="icon-button" type="button" aria-label="关闭预览">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
-              </button>
-            </div>
-            <div id="themePreviewList" class="theme-preview-list"></div>
-          </div>
-        </div>
-        {% endif %}
-
         <section id="license-page" class="page-card" data-page>
           <div class="page-head mobile-action-head">
             <div>
@@ -1372,7 +1338,6 @@
               </div>
             </article>
 
-            {% if ui_brand == "yu" %}
             <article id="fan-page" class="module-tile fan-system-card">
               <div class="module-title">
                 <h3>风扇控制</h3>
@@ -1411,7 +1376,6 @@
                 </section>
               </div>
             </article>
-            {% endif %}
           </div>
         </section>
 
@@ -1483,71 +1447,6 @@
           </div>
         </section>
 
-        {% if ui_brand == "xh" %}
-        <section id="fan-page" class="page-card" data-page>
-          <div class="page-head mobile-action-head">
-            <div>
-              <p>风扇控制</p>
-              <h2>风扇控制</h2>
-            </div>
-            <span id="fanControlPill" class="pill">未检测到PWM接口</span>
-          </div>
-
-          <div class="hardware-grid fan-page-grid">
-            <article class="module-tile">
-              <div class="module-title">
-                <h3>全速运行</h3>
-                <label class="switch"><input id="fan_control_enabled" data-config type="checkbox"><span></span></label>
-              </div>
-              <div class="field-grid compact fan-control-grid">
-                <label class="field">温度来源
-                  <select id="fan_control_temperature_source" data-config>
-                    <option value="auto">自动</option>
-                    <option value="soc">RK3588 SoC</option>
-                    <option value="cpu_big">CPU 大核</option>
-                    <option value="gpu">GPU</option>
-                    <option value="npu">NPU</option>
-                    <option value="hailo">Hailo-8</option>
-                  </select>
-                </label>
-              </div>
-            </article>
-
-            <article class="module-tile">
-              <div class="module-title">
-                <h3>运行状态</h3>
-                <span id="fanRuntimeMode" class="pill">待机</span>
-              </div>
-              <div class="hailo-status-grid fan-status-grid">
-                <div>
-                  <span>PWM 控制接口</span>
-                  <strong id="fanControlAvailableValue">--</strong>
-                </div>
-                <div>
-                  <span>温度来源</span>
-                  <strong id="fanTemperatureSourceValue">--</strong>
-                </div>
-                <div>
-                  <span>当前温度</span>
-                  <strong id="fanTemperatureValue">--</strong>
-                </div>
-                <div>
-                  <span>当前风量</span>
-                  <strong id="fanPwmValue">--</strong>
-                </div>
-                <div>
-                  <span>转速反馈</span>
-                  <strong id="fanRpmValue">--</strong>
-                </div>
-                <div>
-                  <span>状态</span>
-                  <strong id="fanErrorValue">--</strong>
-                </div>
-              </div>
-            </article>
-          </div>
-        </section>
-        {% endif %}
       </main>
     </div>
 

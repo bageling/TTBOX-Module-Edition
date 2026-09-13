@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # edid_apply.sh — TTBOX EDID 统一应用入口
-# 对齐 YU：生成 EDID → HPD 重协商 + 注入 HDMI-RX → 回读校验 → 保存固件副本。
+# TTBOX 标准流程：生成 EDID → HPD 重协商 + 注入 HDMI-RX → 回读校验 → 保存固件副本。
 # 默认自动切 HPD 让源端重新读取 EDID；TTBOX_EDID_REHANDSHAKE=0 可退回纯注入。
 # 不修改 DRM/真实显示器输出。
 # 用法：sudo bash /opt/ttbox/scripts/edid/edid_apply.sh [device]  默认 /dev/video0
@@ -15,7 +15,7 @@ if [ "$VIDEO_DEV" != "/dev/video0" ]; then
   exit 2
 fi
 export PY_ROOT="${PY_ROOT:-/opt/ttbox/scripts}"
-# 默认按 YU 流程重协商；明确指定 0 才退回纯注入。
+# 默认按标准流程重协商；明确指定 0 才退回纯注入。
 REHANDSHAKE="${TTBOX_EDID_REHANDSHAKE:-1}"
 HPD_STATUS=""
 if [ "$REHANDSHAKE" = "1" ]; then
@@ -145,7 +145,7 @@ print(cfg.get('name','TTBOX')[:13])
 " 2>/dev/null || echo "TTBOX")
 
 if [ "$REHANDSHAKE" = "1" ]; then
-  # RK3588/YU 实际流程：HPD 断开后源端不一定一次就完成重新枚举。
+  # RK3588 实际流程：HPD 断开后源端不一定一次就完成重新枚举。
   # 采用有限重试，每轮都重新拉低/拉高 HPD，直到 EDID 回读且 RX 锁定。
   trap 'set_hpd on 2>/dev/null || true' EXIT
 fi

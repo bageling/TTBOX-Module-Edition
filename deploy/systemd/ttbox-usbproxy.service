@@ -1,6 +1,6 @@
 [Unit]
-Description=TTBOX USB mouse passthrough proxy (YU-compatible)
-After=multi-user.target aiassistance-daemon.service usb-proxy.service
+Description=TTBOX USB mouse passthrough proxy
+After=multi-user.target usb-proxy.service
 Conflicts=usb-proxy.service usb-proxy-test.service
 StartLimitIntervalSec=0
 

@@ -13,7 +13,7 @@ from typing import Any
 DEFAULT_PASSWORD = os.environ.get("TTBOX_WIFI_DEFAULT_PASSWORD", "12345678")
 _default_ssids_raw = os.environ.get("TTBOX_WIFI_DEFAULT_SSIDS")
 if _default_ssids_raw is None:
-    _default_ssids_raw = f"{os.environ.get('TTBOX_WIFI_DEFAULT_SSID', 'TTBOX')} XCSH XHAI"
+    _default_ssids_raw = os.environ.get("TTBOX_WIFI_DEFAULT_SSID", "TTBOX")
 DEFAULT_SSIDS = [item.strip() for item in re.split(r"[\s,]+", _default_ssids_raw) if item.strip()] or ["TTBOX", "TTBOX-5G"]
 DEFAULT_SSID = DEFAULT_SSIDS[0]
 DEFAULT_CONNECTION_PREFIX = os.environ.get("TTBOX_WIFI_DEFAULT_CONNECTION_PREFIX", "ttbox-default-")

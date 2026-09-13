@@ -122,7 +122,7 @@
 
 ### 10. RuntimeConfig 模型相关配置
 
-`/opt/ttbox/config/default.json` 顶层键（复刻 YU 平铺格式）：
+`/opt/ttbox/config/default.json` 顶层键（Web 前端平铺配置格式）：
 - `model_path` / `model_label` / `model_input_width` (256) / `model_input_height` (256)
 - `model_color_order` (rgb) / `model_class_names_text` / `model_notes` / `model_uploaded`
 - `model_registry_root` (`/opt/ttbox/models`)
@@ -171,7 +171,7 @@
 5. **预览与模型输入彻底解耦**（Preview = 原始 Capture 中心可调 Crop，默认 640×640；模型输入 256/320/416/640 都不能影响 Preview）
 6. **不允许为单个模型写死推理流水线**；模型差异全部进 ModelAdapter/Decoder
 7. **禁止假 PASS**：验证失败必须 INVALID/UNSUPPORTED/LOAD_FAILED，不能加载失败报成功
-8. 状态字符串对齐 YU：`disabled/enabled/idle/not_running/未导入模型` 等
+8. 状态字符串统一：`disabled/enabled/idle/not_running/未导入模型` 等
 
 ---
 

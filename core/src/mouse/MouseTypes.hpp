@@ -67,7 +67,7 @@ struct ClassOffset {
     int priority = 0;       // 优先级（同类别多个 offset 时取 priority 最高）
 };
 
-// 头部瞄准约束（第3项，参考 VisionForge head_aim_policy）
+// 头部瞄准约束（瞄准点限定在头框内部安全区）
 // 把瞄准点限制在"头框内部安全区"，防止瞄准点飘出头部（锁头稳定）。在 body 框上估算头区：
 //   head_top = y1 + head_offset_top_fraction × h（默认 0.04）
 //   head_bottom = y1 + (head_offset_top_fraction + head_height_fraction) × h（默认 0.04+0.28=0.32 → 上 32% 为头区）
@@ -122,7 +122,7 @@ struct HumanizeConfig {
 };
 
 // 拟人化整形引擎（personal_trajectory_shader：Fitts 时长 + 速度包络 + 垂直抖动 + 自适应抑制 + 安全守卫）
-// 参考 VisionForge personal_trajectory_shaper 算法移植（见 docs/web/TTBOX_VISIONFORGE_对照分析.md 第 1 项）。
+// TTBOX 拟人化整形：Fitts 时长 + 速度包络 + 垂直抖动 + 自适应抑制 + 安全守卫。
 // 作用在 AimThread 输出链 move_x/move_y（int16 HID count）上、热键 Gate 之前：
 //   把"恒定 PID 输出"整形为"接近真人手部动作"的移动包络（加速→减速 + 垂直随机抖动 + 安全钳制）。
 // 不绕过 PID / 死区 / 热键安全门（整形后仍被 Gate 归零）。
@@ -156,10 +156,10 @@ struct PersonalTrajectoryConfig {
 };
 
 // 压枪（recoil：按住开火键期间持续下压，补偿后坐力）
-// 参考 YU 压枪模块行为设计（12 参数语义一致），但输出链完全基于 TTBOX 自身：
+// 压枪模块行为设计（12 参数语义），输出链完全基于 TTBOX 自身：
 //   压枪量在 AimThread 输出链 pull_curve 之后、deadzone 之前注入 scaled_y，
 //   与 PID 输出融合后统一走 deadzone → remainder → int16 → 拟人化整形 → 热键 Gate。
-// 不照搬 YU 独立 recoil 链路；默认全关，保持旧行为。
+// 不照搬独立 recoil 链路；默认全关，保持旧行为。
 struct RecoilConfig {
     bool enabled = false;            // 总开关
     int hotkey = 0x01;               // 开火热键位掩码（1=left，复用 y_axis_fire_hotkey 语义）
@@ -178,7 +178,7 @@ struct RecoilConfig {
 };
 
 // 目标锁定确认配置（ENTER/HOLD 双阈值 + 确认帧 + instant-enter，第2项）
-// 参考 VisionForge control_gate：新目标需更高置信度连续确认，已锁目标用较低阈值保持（防闪烁），
+// control_gate 目标确认：新目标需更高置信度连续确认，已锁目标用较低阈值保持（防闪烁），
 // 近距离高置信目标跳过确认窗（快瞄）。
 struct LockConfirmConfig {
     int confirmation_frames = 1;      // 新目标连续确认帧数（默认 1=首帧即锁，兼容旧行为）

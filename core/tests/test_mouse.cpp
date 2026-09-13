@@ -535,7 +535,7 @@ TEST(mouse_router_parse_logitech_layout) {
 // ---------------------------------------------------------------------------
 // 插件：PullCurve（拉枪曲线）/ ContinuousLead（持续提前量）/ Humanize（拟人）
 // ---------------------------------------------------------------------------
-TEST(mouse_yu_pull_curve_activates_only_beyond_min_distance) {
+TEST(mouse_pull_curve_activates_only_beyond_min_distance) {
     aim::PullCurveConfig cfg;  // enabled=true min_distance=80 strength=0.8
     aim::PullCurve pc;
     // 距离 50 < 80：不激活 → 附加 0
@@ -548,7 +548,7 @@ TEST(mouse_yu_pull_curve_activates_only_beyond_min_distance) {
     pc.reset();
 }
 
-TEST(mouse_yu_continuous_lead_needs_accumulated_distance) {
+TEST(mouse_continuous_lead_needs_accumulated_distance) {
     aim::ContinuousLeadConfig cfg;  // enabled=false 默认
     aim::ContinuousLead cl;
     // 未启用：返回 0
@@ -567,7 +567,7 @@ TEST(mouse_yu_continuous_lead_needs_accumulated_distance) {
     cl.reset();
 }
 
-TEST(mouse_yu_humanize_adds_jitter_only_when_enabled) {
+TEST(mouse_humanize_adds_jitter_only_when_enabled) {
     aim::HumanizeConfig cfg;  // enabled=true jitter_px=0.25
     aim::Humanize hz;
     float x = 0.0f, y = 0.0f;
@@ -586,7 +586,7 @@ TEST(mouse_yu_humanize_adds_jitter_only_when_enabled) {
 // ---------------------------------------------------------------------------
 // RuntimeProfile mouse 段序列化（对齐参数/自适应死区/拉枪插件）
 // ---------------------------------------------------------------------------
-TEST(mouse_profile_yu_fields_roundtrip) {
+TEST(mouse_profile_fields_roundtrip) {
     RuntimeProfile p;
     p.mouse.predict_x = 0.6f;
     p.mouse.predict_y = 0.7f;
@@ -608,4 +608,3 @@ TEST(mouse_profile_yu_fields_roundtrip) {
     CHECK(q.mouse.pull_curve.strength == 0.9f);
     CHECK(q.mouse.pull_curve.min_distance == 100.0f);
 }
-

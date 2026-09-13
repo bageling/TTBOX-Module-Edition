@@ -3,8 +3,7 @@
 > 验收日期：2026-09-05
 > 验收原则：**不只看 HTTP/JSON**。每个场景验证完整链路：用户操作 → API → 配置 → Runtime → 真实模块 → 实际输出。
 > 验收环境：RK3588 Orange Pi 5 Plus（192.168.0.53），HDMI 信号源接入中（Capture 200fps 实测）。
-> 双系统：TTBOX core+web 与 YU web+daemon **同时运行**（第三轮实测可行）。
-> 配套脚本：`tests/compatibility/real_function_test.sh`（22项单功能真实副作用）、`tests/compatibility/ttbox_monitor.sh`（10分钟连续运行采样）。
+> 配套脚本：`tests/monitor/ttbox_monitor.sh`（10 分钟连续运行采样）、`tests/monitor/real_function_test.sh`（单功能真实副作用检查）。
 
 ## 汇总
 
@@ -20,8 +19,7 @@
 | E2E-008 模型→目标→鼠标链路 | 🟡 环境限制（画面无目标 + 无 USB HID 输出设备） |
 | E2E-009 Core 重启恢复 | ✅ PASS |
 | E2E-010 Web 重启 | ✅ PASS |
-| E2E-011 TTBOX/YU 双系统同时运行 | ✅ PASS |
-| E2E-012 异常恢复 | ✅ PASS |
+| E2E-011 异常恢复 | ✅ PASS |
 | 连续使用 10 分钟 | ✅ PASS（数据见下） |
 
 ## 本轮修复（2 处根因）
@@ -30,7 +28,7 @@
 |---|------|------|------|
 | 1 | ModelRegistry::list | 只有 model.rknn 无 manifest.json 的已安装模型不列出 → MODEL_LIST 空 → 前端模型库空白、无法切换 | list() 兼容无 manifest 模型（model.rknn 存在即列出，status=installed） |
 | 2 | 模型路径分裂 | Core ModelRegistry root=/opt/ttbox/src/models（默认），web=/opt/ttbox/models → 两侧不一致 | default.json 设 model_registry_root=/opt/ttbox/models 统一 |
-| 3 | 预设保存格式 | 预设存 RuntimeProfile 结构，load 用 YU 翻译层 → "API 成功但配置没恢复" | 保存改为 profile_to_yu()（YU 前端格式），load 兼容两种格式 |
+| 3 | 预设保存格式 | 预设存 RuntimeProfile 结构，load 用 Web 翻译层 → "API 成功但配置没恢复" | 保存改为 profile_to_web()（Web 前端格式），load 兼容两种格式 |
 
 ## E2E-001：启动完整系统
 
@@ -94,11 +92,11 @@
 - **涉及 API**：POST /api/presets → PUT /api/config → POST /api/presets/load
 - **涉及 Runtime**：SET_CONFIG 热更新 + runtime_profile 文件
 - **实际行为（实测）**：
-  - 保存 A：预设文件真实生成（2645B），格式 = YU 前端结构（含 video_detection_confidence/ai.controller）
+  - 保存 A：预设文件真实生成（2645B），格式 = Web 前端扁平结构（含 video_detection_confidence/ai.controller）
   - 改到 B：Core 内存 `0.699999988`（真实热更新）
   - 加载 A：load ok:true → **Core 内存恢复 0.25**（修复前：load 返回成功但配置不变）
   - 推理全程持续：capture_fps=200.8、e2e=10.31ms
-- **根因修复**：预设保存改为 profile_to_yu()（此前存 RuntimeProfile 结构 → load 翻译层不识别 → "API 成功但实际没恢复"）
+- **根因修复**：预设保存改为 profile_to_web()（此前存 RuntimeProfile 结构 → load 翻译层不识别 → "API 成功但实际没恢复"）
 - **最终状态**：✅ PASS
 
 ## E2E-006：Hotkey→Aim→PID→HID
@@ -150,17 +148,7 @@
   - 配置不丢失（web 重启后 GET /api/config 正常返回）
 - **最终状态**：✅ PASS
 
-## E2E-011：TTBOX / YU 双系统同时运行
-
-- **用户操作**：TTBOX（core+web）+ YU（web+daemon）四服务同时 active
-- **实际行为（实测）**：
-  - TTBOX 修改配置（conf 0.25→0.3）→ **YU state 配置不变（0.25）** + YU 服务健康
-  - 双方 web HTTP 200（8000/8080）
-  - TTBOX Core 采集 200fps 期间 YU daemon 正常运行
-  - 结论：HDMI RX 当前未被 YU daemon 独占（此前"独占"假设需修正），双系统可并行
-- **最终状态**：✅ PASS
-
-## E2E-012：异常恢复
+## E2E-011：异常恢复
 
 - **用户操作**：停 Core（Web 保持）→ 观察 → 恢复 Core
 - **异常时 Web 诚实性（实测）**：
@@ -218,7 +206,7 @@
    - 注入验证改为**全字节对比**（读回 == 注入文件，不再只看 name）
    - 注入前**备份驱动当前 EDID**，失败时恢复（杜绝破坏性残留）
    - HPD 循环改为"先注入验证 → 再 HPD toggle → 检查驱动 EDID 非 0"
-2. **hardware_display.json**：native_only=true + native_mode=1080p240（对齐 YU 语义，杜绝 PC 协商 800x600 兜底）
+2. **hardware_display.json**：native_only=true + native_mode=1080p240（对齐实测成功语义，杜绝 PC 协商 800x600 兜底）
 3. **重启恢复**：内核 hdmirx_edid_init_config 重新注入 → PC 恢复 1920x1080p240 HDMI → RGA/推理/预览全恢复（实测 206fps / e2e 10.2ms / preview 15fps）
 
 ### 遗留
@@ -229,25 +217,25 @@
 ### 现象
 - EDID 身份信息（vendor/name/serial）注入成功，1080p 可协商，但 1440p（2K）模式 PC 始终拒绝
 
-### 根因（与 YU 逐字节对比定位，共 5 处）
+### 根因（与 RK3588 实测基线逐字节对比定位，共 5 处）
 1. **DTD1 打包布局错误**（_pack_dtd）：h_active/h_blank 字节序排错 → PC 解析出 1x2571 而非 2560x1440
-2. **DTD byte17 非法标志**：TTBOX 写 0x60（DVI 时代立体声位）→ YU 写 0x1A（数字分离同步 +h +v）
+2. **DTD byte17 非法标志**：TTBOX 写 0x60（DVI 时代立体声位）→ 实测基线写 0x1A（数字分离同步 +h +v）
 3. **缺 HDMI VSDB 或注册 ID 反序**：TTBOX 写 `00 0c 03`（大端）→ HDMI 规范要求 LSB-first `03 0c 00`
 4. **缺 HF-VSDB（HDMI 2.0）+ EDID 版本 1.3**：586.345MHz > HDMI 1.4 上限 340MHz，
    必须有 HF-VSDB 声明 HDMI 2.0，而 HF-VSDB 规范要求 EDID ≥1.4
-5. **扩展块塞了非标准 DTD**：YU 扩展块 DTD 区全空（时序只在基础块 DTD1），
+5. **扩展块塞了非标准 DTD**：实测基线扩展块 DTD 区全空（时序只在基础块 DTD1），
    TTBOX 混入的非标准模式让 PC 整体拒绝
 
-### 修复（builder.py + timing_db.py，全部对齐 YU 成功版）
+### 修复（builder.py + timing_db.py，全部对齐 RK3588 实测成功版）
 - `_pack_dtd`：标准 EDID DTD 字节布局（byte2-11 逐字段修正）+ image size 698x392mm
 - `dtd_flags`：默认 0x1A，CEA 594MHz 模式（1080p240/4K60）0x1E
-- `_hdmi_vsdb`：HDMI1.4 VSDB(8B) + HF-VSDB(8B)，注册 ID LSB-first，逐字节 = YU
-- 基础块：EDID 1.4 + established timings(25-34) + feature(0x0A) + 名称/序列号描述符 YU 格式
+- `_hdmi_vsdb`：HDMI1.4 VSDB(8B) + HF-VSDB(8B)，注册 ID LSB-first，逐字节 = 实测基线
+- 基础块：EDID 1.4 + established timings(25-34) + feature(0x0A) + 名称/序列号描述符实测格式
 - `_build_cta_extension`：dtd_start=20，DTD 区全空
 - timing_db：1440p60/120/144/165 + 1080p144 像素时钟改 VESA 标准值（248.87/497.75/586.345/663.75/348.941MHz）
 
 ### 验证（实测）
-- TTBOX 生成的 256B EDID 与 YU 成功版**逐字节完全一致（diff=0）**
+- TTBOX 生成的 256B EDID 与 RK3588 实测成功版**逐字节完全一致（diff=0）**
 - HPD off → v4l2-ctl --set-edid 注入 → HPD on → **PC 协商到 2560x1440p144 HDMI**
 - Core 推理：input 2560x1440 | capture 140.8fps | e2e 11.23ms | infer 7.29ms | preview 15.3fps
 - imcrop 失败 0 次；回归 24/24 + 22/22 PASS

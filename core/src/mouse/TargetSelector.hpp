@@ -47,14 +47,14 @@ struct TargetSelectorConfig {
     float aim_ratio_y = 0.2f;
     float switch_match_ratio = 0.4f; // rect_lock 匹配距离 = 目标对角 × 此比例
 
-        // ---- ByteTrack 增强（第4项，参考 VisionForge bytetrack_tracker.py）----
+        // ---- ByteTrack 增强（多轨迹跟踪与长时间静默裁剪）----
         // 在保持原有 track_lock/rect_lock/score 三层选择语义不变的前提下，
         // 为轨迹增加"卡尔曼速度预测 + 轨迹生命周期"：
         //   (1) association 参考点用 Kalman 预测框（非裸框心），
         //       慢速/匀速目标在测试中预测≈当前 → 行为兼容旧用例。
         //   (2) track 超 lost_frames 达 track_buffer_frames 即删除（修"只增不删"隐患）。
         //   (3) 总轨迹数超过 max_tracks 时优先裁剪最早未命中（最长静默）轨迹。
-        float kalman_velocity_gain = 0.30f;  // 速度学习增益（VisionForge 0.22+q*8≈0.30）
+        float kalman_velocity_gain = 0.30f;  // 速度学习增益（0.22+q*8≈0.30）
             float kalman_max_speed_px = 25.0f;   // 预测速度上限（px/帧），防抖预测过度
             bool use_kalman_predict = false;      // 是否用卡尔曼预测中心做关联参考点
                                                   // 默认关：保持"裸框心最近邻"传统行为（109 用例兼容）。

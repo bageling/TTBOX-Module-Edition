@@ -205,7 +205,7 @@ lock_confirm/head_aim 的 enabled 开关
 | 2 | controller/ 目录 PidController 仅测试用，默认值旧 | 测试与生产参数不一致风险 | 测试改用 pid1 标准值或标注 TEST-ONLY |
 | 3 | Smooth/OutputScale/Deadzone/RateLimit/AlphaBetaGammaFilter 纯死代码 | 代码噪声 | 确认零引用后删除（需先查 CMake） |
 | 4 | fov_mode 双重缩放嫌疑 | 启用该模式时输出异常 | 启用前实测或改注入点 |
-| 5 | gain_x_px_per_count 半死（只写不读） | X 轴标定结果压枪用不上 | 确认 YU 语义后决定消费侧 |
+| 5 | gain_x_px_per_count 半死（只写不读） | X 轴标定结果压枪用不上 | 确认标定语义后决定消费侧 |
 | 6 | 死参数 15 个仍序列化落盘 | default.json 冗余 | 待用户确认后清理（涉及 Web 翻译层同步） |
 
 ---
@@ -224,7 +224,6 @@ lock_confirm/head_aim 的 enabled 开关
 | 不动 | 死参数字段 15 个（涉及 default.json/Web 兼容，待单独确认） | — |
 
 > 清理原则：只删**生产链路零引用**的代码；有测试契约的 V1 组件（MotionController/Deadzone/RateLimit/MotionMerge 等）保留文件但已从生产链路摘除死成员。
-
 
 
 

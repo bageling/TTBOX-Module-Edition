@@ -140,14 +140,14 @@ http_json DELETE /api/system/lan-blocklist > /dev/null
 B4_CNT=$(iptables -S TTBOX_BLOCKLIST 2>/dev/null | grep -c '192.168.0.99')
 assert_eq "B4 clear 后规则数" "$B4_CNT" "0"
 
-# B5: 隔离（YU chain 在 nft 后端，不碰）
-B5_YT=$(iptables -S AIASSISTANCE_BLOCKLIST 2>/dev/null | grep -v Warning | grep -c 'AIASSISTANCE')
-if [ "$B5_YT" -ge 1 ]; then ok "B5 YU chain 未受影响"; else bad "B5 YU chain 异常"; fi
+# B5: TTBOX 独立 chain 保持存在
+B5_CHAIN=$(iptables -S TTBOX_BLOCKLIST 2>/dev/null | grep -c 'TTBOX_BLOCKLIST')
+if [ "$B5_CHAIN" -ge 1 ]; then ok "B5 TTBOX_BLOCKLIST chain 存在"; else bad "B5 TTBOX_BLOCKLIST chain 异常"; fi
 
 note ''
 note '════════ C 组：诚实错误（拒绝假成功） ════════'
 
-# C1: reactivate 对齐 YU（400 + 无需修复）
+# C1: reactivate 对齐 TTBOX 契约（400 + 无需修复）
 http_json POST /api/system/reactivate > /tmp/rft_c1.json
 C1_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/system/reactivate")
 if [ "$(err_has /tmp/rft_c1.json '当前授权状态正常')" = "YES" ]; then ok "C1 reactivate 文案"; else bad "C1 reactivate 文案 ($(cat /tmp/rft_c1.json))"; fi

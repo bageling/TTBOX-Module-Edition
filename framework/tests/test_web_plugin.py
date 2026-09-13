@@ -33,7 +33,7 @@ class WebPluginTests(unittest.TestCase):
         for route in ("/api/state", "/api/models", "/api/config", "/api/system", "/api/hailo/status", "/api/network/wifi", "/api/update/status"):
             self.assertIn(route, rules)
 
-    def test_ttbox_state_and_license_do_not_fall_back_to_yu_values(self):
+    def test_ttbox_state_and_license_contract(self):
         entry = WEB_PLUGIN / "bin" / "ttbox-web.py"
         spec = importlib.util.spec_from_file_location("ttbox_web_state_contract", entry)
         module = importlib.util.module_from_spec(spec)
@@ -48,7 +48,7 @@ class WebPluginTests(unittest.TestCase):
             "data": {"models": []},
         } if request_type == "MODEL_LIST" else {"status": 1, "data": {}}
 
-        state = module.collect_yu_state()["data"]
+        state = module.collect_web_state()["data"]
         license_data = module._license_payload()
 
         self.assertEqual(state["selected_model_id"], "ttbox-model")

@@ -102,7 +102,7 @@ if(UNIX AND NOT APPLE)
     src/preview/PreviewModule.cpp
   )
   # RGA（librga，阶段 A-3）：板端已装 /usr/local；缺失则不编译 RGA 源
-  # RGA（librga）：TTBOX 独立库位于 /opt/ttbox/lib（完全隔离 yu，不从 /opt/aiassistance 借用）
+  # RGA（librga）：TTBOX 独立库位于 /opt/ttbox/lib
   find_path(RGA_INCLUDE_DIR im2d.h PATHS /opt/ttbox/lib/include /usr/local/include /usr/include /usr/include/rga)
   find_library(RGA_LIBRARY rga PATHS /opt/ttbox/lib /usr/local/lib)
   if(RGA_INCLUDE_DIR AND RGA_LIBRARY)
@@ -113,7 +113,7 @@ if(UNIX AND NOT APPLE)
     message(WARNING "librga 未找到（include=${RGA_INCLUDE_DIR} lib=${RGA_LIBRARY}），RgaProcessor 不编译")
   endif()
 
-  # RKNN（librknnrt）：TTBOX 独立库，绝对路径锁定 /opt/ttbox/lib（完全隔离 yu/系统）
+  # RKNN（librknnrt）：TTBOX 独立库，绝对路径锁定 /opt/ttbox/lib
   find_path(RKNN_INCLUDE_DIR rknn_api.h PATHS ${CMAKE_CURRENT_SOURCE_DIR}/third_party/rknn)
   if(EXISTS /opt/ttbox/lib/librknnrt.so)
     set(RKNNRT_LIBRARY /opt/ttbox/lib/librknnrt.so)
@@ -214,7 +214,7 @@ endif()
 if(UNIX AND NOT APPLE AND TTBOX_CORE_HAS_RKNN)
   add_executable(ttbox_core_main src/main.cpp)
   target_link_libraries(ttbox_core_main PRIVATE ttbox_core)
-  # TTBOX 独立运行库路径（完全隔离 yu，运行时只从 /opt/ttbox/lib 加载 librga 等）
+  # TTBOX 独立运行库路径，运行时只从 /opt/ttbox/lib 加载 librga 等
   set_target_properties(ttbox_core_main PROPERTIES
     INSTALL_RPATH "/opt/ttbox/lib"
     BUILD_RPATH "/opt/ttbox/lib"

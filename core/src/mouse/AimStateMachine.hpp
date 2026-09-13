@@ -5,7 +5,7 @@
 // 默认丢失宽限 78ms。
 // 退出 AIMING / 进入新目标时产生 reset 需求（Reset MotionController + Tracker）。
 //
-// 第2项升级（目标锁定确认，参考 VisionForge control_gate ENTER/HOLD）：
+// 第2项升级（目标锁定确认：ENTER/HOLD 双阈值门控）：
 //   - ENTER：新目标需连续 confirmation_frames 帧通过确认置信度阈值(target_enter_conf)
 //             才进入 AIMING（抗检测闪烁/误触发）。
 //   - HOLD ：已锁定目标在后续帧可用较低阈值(target_hold_conf)保持（不被置信度小抖动打断）。

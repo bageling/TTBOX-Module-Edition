@@ -6,7 +6,7 @@
 //   Case3 拉枪 disabled                  -> 无弧线附加
 //   Case4 热键OFF + 拉枪激活             -> 最终输出仍被安全门吃成 {0,0}
 //
-// 说明：PullCurve 算法本身的单测在 test_mouse.cpp（mouse_yu_pull_curve_*），
+// 说明：PullCurve 算法本身的单测在 test_mouse.cpp（mouse_pull_curve_*），
 // 本文件只验证 AimThread 输出链注入点位置正确、与死区/安全门的先后关系正确。
 #include <chrono>
 #include <cstdio>

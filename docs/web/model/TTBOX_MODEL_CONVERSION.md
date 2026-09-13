@@ -12,7 +12,7 @@
 
 - TTBOX 板端实测：`librknnrt.so 1.5.2 (c6b7b351a@2023-08-23T15:28:22)`
 - 因此转换必须用 **rknn-toolkit2 1.5.x**（推荐 1.5.2）
-- ⚠️ **严禁使用 yu 系统的 rknn-toolkit2 2.3.2 转换结果直接喂 TTBOX**（隔离铁律 + 版本不匹配：runtime 1.5.2 加载高版本模型会 `Verify ModelBuffer failed`）
+- ⚠️ **严禁使用 rknn-toolkit2 2.3.2 等不匹配版本转换结果直接喂 TTBOX**（隔离铁律 + 版本不匹配：runtime 1.5.2 加载高版本模型会 `Verify ModelBuffer failed`）
 - 判断模型代差：`RKNN_LOG_LEVEL=4` 下 rknn_init 失败看具体原因；`invalid MAGIC`=格式坏，`Verify ModelBuffer failed`=版本不兼容
 
 ---

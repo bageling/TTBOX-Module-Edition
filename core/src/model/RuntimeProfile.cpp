@@ -337,7 +337,7 @@ JsonValue RuntimeProfile::to_json() const {
     lk.set("instant_enter_dist", JsonValue::number(static_cast<double>(mouse.lock_confirm.instant_enter_dist)));
     lk.set("instant_enter_conf", JsonValue::number(static_cast<double>(mouse.lock_confirm.instant_enter_conf)));
     m.set("lock_confirm", std::move(lk));
-    // 压枪（recoil）：开火期间下压补偿后坐力（YU 压枪 12 参数语义，输出链基于 TTBOX 自身）
+    // 压枪（recoil）：开火期间下压补偿后坐力（12 参数语义，输出链基于 TTBOX 自身）
     JsonValue rc = JsonValue::object();
     rc.set("enabled", JsonValue::boolean(mouse.recoil.enabled));
     rc.set("hotkey", JsonValue::number(static_cast<double>(mouse.recoil.hotkey)));
@@ -524,7 +524,7 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
             p.mouse.lock_confirm.instant_enter_dist = static_cast<float>(obj_num(*lk, "instant_enter_dist", 105.0));
             p.mouse.lock_confirm.instant_enter_conf = static_cast<float>(obj_num(*lk, "instant_enter_conf", 0.50));
         }
-        // 压枪（recoil）解析：缺失字段用 YU 默认值（全部关/零输出，保持旧行为）
+        // 压枪（recoil）解析：缺失字段用默认值（全部关/零输出，保持旧行为）
         if (const JsonValue* rk = m->find("recoil"); rk && rk->is_object()) {
             p.mouse.recoil.enabled = obj_bool(*rk, "enabled", false);
             p.mouse.recoil.hotkey = static_cast<int>(obj_int(*rk, "hotkey", 1));

@@ -9,7 +9,7 @@ ExecStart=/opt/ttbox/bin/ttbox_core_main --config /opt/ttbox/config/default.json
 WorkingDirectory=/opt/ttbox
 Restart=always
 RestartSec=2
-# TTBOX 独立运行库路径（完全隔离 yu，不使用 /usr/local/lib 或 /opt/aiassistance）
+# TTBOX 独立运行库路径，只从 /opt/ttbox/lib 加载运行库
 Environment=LD_LIBRARY_PATH=/opt/ttbox/lib
 
 [Install]

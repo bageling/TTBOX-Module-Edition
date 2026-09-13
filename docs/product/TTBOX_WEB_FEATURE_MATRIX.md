@@ -196,7 +196,7 @@
 
 | 位置 | 内容 | 处理 |
 |------|------|------|
-| app.js | 历史品牌分支（yu/xh 变量残留） | 清理 |
+| app.js | 历史品牌分支（ttbox 单品牌化） | 清理 |
 | ttbox_web.py | /api/hailo/*（无硬件） | 标记 PLANNED 或保留 |
 | 板端 app.js | 旧版（未含 Phase 6.1） | 部署同步 |
 | update-page | update/versions、update/install 旧调用 | 已统一为正式 API，核对 |

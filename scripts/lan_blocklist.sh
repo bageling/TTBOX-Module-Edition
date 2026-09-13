@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # TTBOX 局域网黑名单管理（iptables）
-# 隔离设计：使用独立 chain TTBOX_BLOCKLIST，绝不触碰 YU 的 AIASSISTANCE_BLOCKLIST。
+# 隔离设计：使用独立 chain TTBOX_BLOCKLIST，不影响板端其它网络规则。
 # 用法: lan_blocklist.sh {status|set <ip>|clear|delete <ip>}
 set -u
 CHAIN="TTBOX_BLOCKLIST"

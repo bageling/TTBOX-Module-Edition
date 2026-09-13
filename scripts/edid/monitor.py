@@ -1,5 +1,5 @@
 """TTBOX EDID Monitor — 读取真实显示器信息（DRM connector + hdmirx RX 状态）。
-完全独立于 yu，数据来自内核 /sys/class/drm 与 hdmirx sysfs。
+数据来自内核 /sys/class/drm 与 hdmirx sysfs。
 """
 import glob
 import os

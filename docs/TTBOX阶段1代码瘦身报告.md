@@ -8,7 +8,7 @@
 
 本阶段完成了有证据支持的代码瘦身：
 
-1. 删除历史重复 Core：`yu-backend/yu-core-src/core/`。
+1. 删除仓库历史遗留的重复 Core 副本（目录源码与根 `core` 大量字节级重复）。
 2. 保留 `core/tools/web/ttbox-infer.service` 与 `core/tools/web/ttbox-infer.sh`，因为 Web 管理代码仍存在真实引用；没有贸然归档，避免改变当前生产逻辑。
 3. 将旧 Runtime 服务文件标记为 deprecated，明确其不是唯一生产入口。
 4. 移除部署脚本对已废弃 `test_worker_hw` 二进制的复制依赖。
@@ -36,7 +36,7 @@ HID 当前实现
 ### 删除目录
 
 ```text
-yu-backend/yu-core-src/core/
+历史重复 Core 副本（已删除）
 ```
 
 删除前统计：
@@ -49,7 +49,7 @@ yu-backend/yu-core-src/core/
 
 删除前执行了全仓库文本引用扫描和字节级重复扫描：
 
-- `yu-backend/yu-core-src/core/` 路径只出现在架构文档中。
+- 历史重复 Core 副本路径只出现在架构文档中。
 - 没有 CMake 构建引用。
 - 没有 systemd `ExecStart` 引用。
 - 没有部署脚本将该目录作为源码输入。
@@ -63,7 +63,7 @@ yu-backend/yu-core-src/core/
 
 删除后再次扫描：
 
-### `yu-backend/yu-core-src/core`
+### 历史重复 Core 副本
 
 剩余命中仅位于以下历史文档：
 
@@ -220,7 +220,7 @@ cp $BUILD/ttbox_core_main $OPT/runtime/
 - `infer.json`
 - `scripts/ttbox_web.py` 中的模型配置逻辑
 - `core/tools/web/ttbox_web.py` 中的模型配置逻辑
-- `yu-backend/app.py` 中的模型管理逻辑
+- 旧后端 `app.py` 中的模型管理逻辑
 
 ### 当前确认
 
@@ -261,7 +261,7 @@ cp $BUILD/ttbox_core_main $OPT/runtime/
 - `core/tools/web/ttbox_web.py`
 - `core/src/ipc/IpcServer.cpp/.hpp`
 - `platform/*`
-- `yu-backend/*`
+- 历史重复后端快照
 
 保留原因：
 
@@ -269,7 +269,7 @@ cp $BUILD/ttbox_core_main $OPT/runtime/
 - Gateway 仍负责 IPC 转译。
 - IPC 是 Web 与 C++ Core 的管理边界。
 - Platform supervisor 仍负责服务管理。
-- `yu-backend` 仍包含应用和兼容管理路径。
+- 历史重复后端快照不纳入本阶段构建。
 
 本阶段没有删除 endpoint 或改动接口，避免改变当前生产逻辑。
 
@@ -295,7 +295,7 @@ core/CMakeLists.txt
 旧独立 Worker 入口已移除。硬件链路由 HardwareRunner 验收入口承载。
 ```
 
-根 CMake 中没有引用已删除的 `yu-backend/yu-core-src/core`。
+根 CMake 中没有引用已删除的历史重复 Core 副本。
 
 ## 十一、其他代码/脚本修改
 
@@ -334,15 +334,15 @@ $BUILD/test_worker_hw
 ```text
 总文件数：1082
 root/core 文件数：594
-yu-backend/yu-core-src/core 文件数：209
-yu-backend/yu-core-src/core 总大小：1,428,170 字节
+历史重复 Core 副本文件数：209
+历史重复 Core 副本总大小：1,428,170 字节
 ```
 
 ### 删除后
 
 ```text
-yu-backend/yu-core-src/core：不存在
-yu-backend/yu-core-src：保留为空目录容器
+历史重复 Core 副本：不存在
+历史空目录容器：保留
 ```
 
 ## 十三、构建验证

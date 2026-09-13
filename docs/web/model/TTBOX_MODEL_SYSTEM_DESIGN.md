@@ -153,7 +153,7 @@ POST /api/models/select {model_id}
 
 ## 10. RuntimeConfig 模型相关配置（现状）
 
-`/opt/ttbox/config/default.json`（平铺复刻 YU 格式）：
+`/opt/ttbox/config/default.json`（Web 前端平铺配置格式）：
 
 ```json
 {

@@ -502,7 +502,7 @@ function integrateFanSettings() {
 
   fanPage.removeAttribute("data-page");
   fanPage.classList.remove("page-card", "is-active");
-  fanPage.classList.add("assist-section", "xh-fan-settings-section");
+  fanPage.classList.add("assist-section", "fan-settings-section");
   fanPage.setAttribute("data-assist-section", "");
   fanPage.hidden = true;
   assistStack.appendChild(fanPage);

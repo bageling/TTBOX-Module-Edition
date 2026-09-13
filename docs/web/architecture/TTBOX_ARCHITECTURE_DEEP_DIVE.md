@@ -36,20 +36,20 @@ Web 后端是**唯一**的 API 层，负责：参数翻译、状态聚合、IPC 
 | GET_CONFIG | _get_runtime_profile | 读 RuntimeProfile（Core 是配置唯一真源） |
 | SET_CONFIG | 所有 PUT 端点 | 写 RuntimeProfile（热更新，Core 立即应用） |
 | GET_STATUS | _get_status | 读运行状态/metrics（帧率/目标/延迟） |
-| MODEL_LIST | collect_yu_state | 读模型库列表 + active |
+| MODEL_LIST | collect_web_state | 读模型库列表 + active |
 | MODEL_IMPORT/VALIDATE/INSTALL | import_model | 导入模型三阶段 |
 | MODEL_ACTIVATE | select_model | 激活模型 |
 | MODEL_REMOVE | delete_model | 删除模型 |
 | RUNTIME_CONTROL | control/start-stop | 启动/停止推理 |
 
-## 三、配置翻译层（YU 格式 ↔ RuntimeProfile）
+## 三、配置翻译层（Web 扁平格式 ↔ RuntimeProfile）
 
-前端用 YU 扁平格式（ai.controller.kp_x 等），Core 用 RuntimeProfile 嵌套格式（mouse.kp_x 等）。
+前端用 Web 扁平格式（ai.controller.kp_x 等），Core 用 RuntimeProfile 嵌套格式（mouse.kp_x 等）。
 **两个翻译函数是核心**：
 
-### `yu_body_to_profile(body)` — YU 前端保存 → RuntimeProfile
+### `web_body_to_profile(body)` — Web 前端保存 → RuntimeProfile
 ```
-PUT /api/config → yu_body_to_profile → SET_CONFIG
+PUT /api/config → web_body_to_profile → SET_CONFIG
 ```
 逐字段映射：
 - controller 数值直通：kp_x/ki_x/kd_x/predict_x/rate_x/smooth_x/output_deadzone（CONTROLLER_NUMS 表）
@@ -61,16 +61,16 @@ PUT /api/config → yu_body_to_profile → SET_CONFIG
 - 采集：crop_size → width/height；offset_x/y
 - FOV：range_factor<1 → 圆形选择区（保留 prev shape/center）
 
-### `profile_to_yu(prof)` — RuntimeProfile → YU 前端格式
+### `profile_to_web(prof)` — RuntimeProfile → Web 前端格式
 ```
-GET /api/state → profile_to_yu → config（前端 populate 回读）
+GET /api/state → profile_to_web → config（前端 populate 回读）
 ```
-反向映射，含默认值兜底（缺字段返回 YU 默认：kp=7.0, pull_curve_strength=0.8 等）。
+反向映射，含默认值兜底（缺字段返回 Web 契约默认：kp=7.0, pull_curve_strength=0.8 等）。
 
-## 四、状态聚合层（collect_yu_state — /api/state 的数据源）
+## 四、状态聚合层（collect_web_state — /api/state 的数据源）
 
 ```
-GET /api/state → collect_yu_state()
+GET /api/state → collect_web_state()
 ```
 逻辑：**合并 3 个 IPC 响应 + 2 个本地函数**：
 1. `_get_status()` → GET_STATUS → metrics（帧率/目标/延迟/运行状态）
@@ -160,19 +160,19 @@ POST /activate → 写 active.json + _apply_personal_motion_to_core（写 Runtim
 ### 1. 总览页数据（/api/state）
 ```
 GET /api/state
-→ collect_yu_state()
+→ collect_web_state()
 → ipc GET_STATUS（metrics）+ GET_CONFIG（profile）+ MODEL_LIST（模型）
-→ profile_to_yu（配置翻译）+ _auto_start_payload + _calibration_payload
+→ profile_to_web（配置翻译）+ _auto_start_payload + _calibration_payload
 → 返回完整 data（config/models/presets/state 19 子结构）
 ```
 
 ### 2. 配置保存（PUT /api/config）
 ```
 PUT /api/config
-→ yu_body_to_profile（YU扁平→RuntimeProfile）
+→ web_body_to_profile（Web扁平→RuntimeProfile）
 → _deep_merge_profile（合并进现有 profile）
 → ipc SET_CONFIG（Core 热更新，立即生效）
-→ _get_runtime_profile 回读 → profile_to_yu 返回
+→ _get_runtime_profile 回读 → profile_to_web 返回
 ```
 
 ### 3. 开机自启动（/api/settings/auto-start）
@@ -218,7 +218,7 @@ POST /stop: ipc RUNTIME_CONTROL stop → 返回完整 state
 ```
 GET: 列 /opt/ttbox/presets/*.json 的 stem
 POST: 有 config 用 config，无 config 用 _get_runtime_profile（保存当前配置为预设）
-POST /load: 读预设 json → yu_body_to_profile → merge → SET_CONFIG
+POST /load: 读预设 json → web_body_to_profile → merge → SET_CONFIG
 ```
 
 ### 9. 主题（/api/themes）
@@ -249,7 +249,7 @@ DELETE: _clear_calibration() 删 calibration.json
 
 ```
 GET /motion-profiles: MOTION_STORE.list_profiles()（读所有 profile 目录）
-POST /motion-profiles: 对齐 YU 拒绝创建（仅 default）
+POST /motion-profiles: 对齐 Web 契约拒绝创建（仅 default）
 PATCH /motion-profiles/<id>: rename
 DELETE /motion-profiles/<id>: 删目录 + 若 active 则 deactivate
 POST /motion-profiles/<id>/train: MOTION_STORE.train() → knots 曲线生成
@@ -263,14 +263,12 @@ POST /motion-training/sessions/<id>/samples: append_sample（严格校验）
 ## 十一、核心设计原则（从代码提炼）
 
 1. **Core 是配置唯一真源**：所有 PUT → SET_CONFIG → Core 热更新，回读永远以 Core 为准
-2. **单一翻译层**：yu_body_to_profile / profile_to_yu 两函数承担全部字段映射，无第二套
+2. **单一翻译层**：web_body_to_profile / profile_to_web 两函数承担全部字段映射，无第二套
 3. **诚实反映状态**：Core 不可达时返回 error（不伪造成功）；服务未启用显示 inactive/disabled
 4. **registry 优先**：MODEL_LIST 的 active 覆盖 profile.model_id（防缓存回跳）
 5. **校准是真实闭环**：注入 bias → 采样目标位移 → 算 gain → 写回 kp（非模拟）
 6. **EDID 是完整闭环**：生成 → 校验 → 注入 → HPD → 回读 → 内核持久化
-7. **隔离硬性**：所有路径 /opt/ttbox（不碰 /opt/aiassistance），服务名 ttbox-*（不碰 aiassistance-*）
-
-
+7. **隔离硬性**：所有路径 /opt/ttbox，服务名 ttbox-*，不依赖其它板端服务
 
 
 

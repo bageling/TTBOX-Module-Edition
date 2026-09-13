@@ -1,8 +1,7 @@
 // PersonalTrajectoryShader.hpp — 拟人化整形引擎（第 1 项落地）
 //
 // 作用：把 AimThread 输出链 move_x/move_y（int16 HID count）整形为"接近真人手部动作"的
-//       移动轨迹，替代原来"恒定 PID 输出"。移植自 VisionForge personal_trajectory_shaper
-//       （见 docs/web/TTBOX_VISIONFORGE_对照分析.md 第 1 项，算法忠实对照）核心四件套：
+//       移动轨迹，替代原来"恒定 PID 输出"。核心四件套：
 //         1. Fitts 时长模型：目标距离 → 单次移动期望时长
 //         2. 速度包络：transport 阶段加速→减速（偏峰铃形 + 可选 16 点经验包络）
 //         3. 垂直向 AR(1) 随机游走抖动：模拟人手曲线（非恒定正弦）

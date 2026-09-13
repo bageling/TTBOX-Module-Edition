@@ -204,10 +204,6 @@ html[data-theme="light"] .sidebar {
   background: rgba(233, 241, 248, 0.9);
 }
 
-html[data-ui-brand="xh"] .sidebar {
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
-}
-
 .brand {
   display: flex;
   align-items: center;
@@ -345,10 +341,6 @@ html[data-theme="light"] .module-tab.is-active span {
 
 .theme-toggle::before {
   content: "";
-  display: none;
-}
-
-html[data-ui-brand="xh"] .theme-toggle {
   display: none;
 }
 
@@ -3743,12 +3735,6 @@ html[data-theme="light"] .model-game-suggestion-list {
   pointer-events: none;
 }
 
-html[data-ui-brand="yu"] .hardware-mode-toggle input {
-  width: 1px;
-  min-height: 0;
-  padding: 0;
-}
-
 .hardware-mode-toggle span {
   display: flex;
   align-items: center;
@@ -4499,10 +4485,6 @@ html[data-theme="light"] .toast {
     height: auto;
     min-height: 0;
     padding: 10px 9px 9px;
-  }
-
-  html[data-ui-brand="xh"] .sidebar {
-    grid-template-rows: auto auto;
   }
 
   .brand {
@@ -5478,7 +5460,7 @@ html[data-theme="light"] .toast {
   }
 }
 
-/* Persistent boot start control shared by the YU and XH home screens. */
+/* Persistent boot start control shared by the TTBOX home screens. */
 .auto-start-control {
   display: inline-flex;
   align-items: center;
@@ -5568,230 +5550,6 @@ html[data-theme="light"] .toast {
   .brand .mobile-auto-start-control {
     flex: 0 0 auto;
   }
-}
-
-
-html[data-ui-brand="xcsh"] {
-  color-scheme: dark;
-  --accent: #a78bfa;
-  --accent-strong: #c4b5fd;
-  --accent-soft: rgba(167, 139, 250, 0.16);
-  --green: #c4b5fd;
-  --violet: #c4b5fd;
-  --xcsh-accent-rgb: 167, 139, 250;
-  --xcsh-accent-strong-rgb: 196, 181, 253;
-}
-
-html[data-ui-brand="xcsh"] body {
-  background:
-    linear-gradient(135deg, rgba(var(--xcsh-accent-rgb), 0.07), transparent 34%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 42%),
-    var(--bg);
-}
-
-html[data-ui-brand="xcsh"] .brand-mark {
-  border-color: rgba(var(--xcsh-accent-rgb), 0.48);
-  color: var(--accent-strong);
-  background: linear-gradient(180deg, rgba(var(--xcsh-accent-rgb), 0.2), rgba(255, 255, 255, 0.035));
-}
-
-html[data-ui-brand="xcsh"] .module-tab.is-active,
-html[data-ui-brand="xcsh"] .control-section-tab.is-active,
-html[data-ui-brand="xcsh"] .wifi-mode-button.is-active {
-  border-color: rgba(var(--xcsh-accent-rgb), 0.38);
-  background: rgba(var(--xcsh-accent-rgb), 0.14);
-}
-
-html[data-ui-brand="xcsh"] .module-tab.is-active span,
-html[data-ui-brand="xcsh"] .control-section-tab.is-active span {
-  color: #100b20;
-  background: var(--accent);
-}
-
-html[data-ui-brand="xcsh"] .module-tabs,
-html[data-ui-brand="xcsh"] .control-section-tabs,
-html[data-ui-brand="xcsh"] .model-card-list {
-  scrollbar-color: rgba(var(--xcsh-accent-rgb), 0.58) rgba(255, 255, 255, 0.06);
-}
-
-html[data-ui-brand="xcsh"] .module-tabs::-webkit-scrollbar-thumb,
-html[data-ui-brand="xcsh"] .control-section-tabs::-webkit-scrollbar-thumb,
-html[data-ui-brand="xcsh"] .model-card-list::-webkit-scrollbar-thumb {
-  background: rgba(var(--xcsh-accent-rgb), 0.62);
-}
-
-html[data-ui-brand="xcsh"] .module-tabs::-webkit-scrollbar-thumb:hover,
-html[data-ui-brand="xcsh"] .control-section-tabs::-webkit-scrollbar-thumb:hover,
-html[data-ui-brand="xcsh"] .model-card-list::-webkit-scrollbar-thumb:hover {
-  background: rgba(var(--xcsh-accent-strong-rgb), 0.72);
-}
-
-html[data-ui-brand="xcsh"] .status-badge.live,
-html[data-ui-brand="xcsh"] .sync-badge.ready,
-html[data-ui-brand="xcsh"] .sync-badge.pending,
-html[data-ui-brand="xcsh"] .sync-badge.saving {
-  color: var(--accent-strong);
-  border-color: rgba(var(--xcsh-accent-strong-rgb), 0.36);
-  background: rgba(var(--xcsh-accent-rgb), 0.1);
-}
-
-html[data-ui-brand="xcsh"] .power-button,
-html[data-ui-brand="xcsh"] .power-button:hover {
-  border-color: rgba(var(--xcsh-accent-rgb), 0.56);
-  color: #100b20;
-  background:
-    linear-gradient(180deg, rgba(var(--xcsh-accent-strong-rgb), 0.96), rgba(var(--xcsh-accent-rgb), 0.78)),
-    var(--accent);
-  box-shadow:
-    0 28px 70px rgba(var(--xcsh-accent-rgb), 0.24),
-    inset 0 -18px 34px rgba(16, 11, 32, 0.18);
-}
-
-html[data-ui-brand="xcsh"] .power-button strong {
-  color: #100b20;
-}
-
-html[data-ui-brand="xcsh"] .power-button::before,
-html[data-ui-brand="xcsh"] .power-ring {
-  border-color: rgba(16, 11, 32, 0.18);
-}
-
-html[data-ui-brand="xcsh"] .power-ring::before {
-  border-top-color: rgba(255, 255, 255, 0.74);
-  border-right-color: rgba(16, 11, 32, 0.22);
-}
-
-html[data-ui-brand="xcsh"] .mini-button,
-html[data-ui-brand="xcsh"] .ghost-button,
-html[data-ui-brand="xcsh"] .button-link,
-html[data-ui-brand="xcsh"] .theme-toggle {
-  border-color: rgba(var(--xcsh-accent-rgb), 0.32);
-  background: rgba(var(--xcsh-accent-rgb), 0.12);
-}
-
-html[data-ui-brand="xcsh"] .mini-button:hover,
-html[data-ui-brand="xcsh"] .ghost-button:hover,
-html[data-ui-brand="xcsh"] .button-link:hover,
-html[data-ui-brand="xcsh"] .theme-toggle:hover {
-  border-color: rgba(var(--xcsh-accent-rgb), 0.56);
-  background: rgba(var(--xcsh-accent-rgb), 0.19);
-}
-
-html[data-ui-brand="xcsh"] .primary-button,
-html[data-ui-brand="xcsh"] .disclaimer-actions button:first-child,
-html[data-ui-brand="xcsh"] .announcement-actions button:first-child {
-  color: #100b20;
-  border-color: rgba(var(--xcsh-accent-rgb), 0.64);
-  background:
-    linear-gradient(180deg, rgba(var(--xcsh-accent-strong-rgb), 0.94), rgba(var(--xcsh-accent-rgb), 0.82)),
-    var(--accent);
-  box-shadow: 0 14px 34px rgba(var(--xcsh-accent-rgb), 0.2);
-}
-
-html[data-ui-brand="xcsh"] input[type="range"]::-webkit-slider-thumb {
-  border-color: #100b20;
-  background: var(--accent);
-  box-shadow: 0 0 0 4px rgba(var(--xcsh-accent-rgb), 0.18);
-}
-
-html[data-ui-brand="xcsh"] input[type="range"]::-moz-range-thumb {
-  border-color: #100b20;
-  background: var(--accent);
-  box-shadow: 0 0 0 4px rgba(var(--xcsh-accent-rgb), 0.18);
-}
-
-html[data-ui-brand="xcsh"] input[type="checkbox"],
-html[data-ui-brand="xcsh"] input[type="radio"],
-html[data-ui-brand="xcsh"] input[type="range"] {
-  accent-color: var(--accent);
-}
-
-html[data-ui-brand="xcsh"] .switch input:checked + span {
-  border-color: rgba(var(--xcsh-accent-rgb), 0.62);
-  background: rgba(var(--xcsh-accent-rgb), 0.24);
-}
-
-html[data-ui-brand="xcsh"] .switch input:checked + span::after {
-  background: var(--accent-strong);
-  box-shadow: 0 0 18px rgba(var(--xcsh-accent-rgb), 0.42);
-}
-
-html[data-ui-brand="xcsh"] .wifi-network-button:hover,
-html[data-ui-brand="xcsh"] .wifi-network-button.is-selected,
-html[data-ui-brand="xcsh"] .preset-select-button:hover,
-html[data-ui-brand="xcsh"] .preset-select-button:focus-visible {
-  border-color: rgba(var(--xcsh-accent-rgb), 0.46);
-  background: rgba(var(--xcsh-accent-rgb), 0.12);
-}
-
-html[data-ui-brand="xcsh"] .wifi-network-button.is-active,
-html[data-ui-brand="xcsh"] .model-card.is-active,
-html[data-ui-brand="xcsh"] .preset-card.is-active,
-html[data-ui-brand="xcsh"] .aim-profile-card.is-active,
-html[data-ui-brand="xcsh"] .auto-trigger-profile-card.is-active {
-  border-color: rgba(var(--xcsh-accent-rgb), 0.7);
-  background:
-    linear-gradient(135deg, rgba(var(--xcsh-accent-rgb), 0.14), transparent 46%),
-    var(--surface-strong);
-}
-
-html[data-ui-brand="xcsh"] .model-card:hover,
-html[data-ui-brand="xcsh"] .model-card:focus-visible,
-html[data-ui-brand="xcsh"] .preset-card:hover,
-html[data-ui-brand="xcsh"] .preset-card:focus-visible,
-html[data-ui-brand="xcsh"] .aim-profile-card:hover,
-html[data-ui-brand="xcsh"] .aim-profile-card:focus-visible,
-html[data-ui-brand="xcsh"] .auto-trigger-profile-card:hover,
-html[data-ui-brand="xcsh"] .auto-trigger-profile-card:focus-visible {
-  border-color: rgba(var(--xcsh-accent-rgb), 0.4);
-  background:
-    linear-gradient(135deg, rgba(var(--xcsh-accent-rgb), 0.09), transparent 44%),
-    var(--surface-strong);
-}
-
-html[data-ui-brand="xcsh"] .model-card.is-active .model-card-status,
-html[data-ui-brand="xcsh"] .preset-card.is-active .preset-card-status {
-  color: var(--accent-strong);
-  border-color: rgba(var(--xcsh-accent-rgb), 0.42);
-  background: rgba(var(--xcsh-accent-rgb), 0.12);
-}
-
-html[data-ui-brand="xcsh"] .model-card.is-missing,
-html[data-ui-brand="xcsh"] .model-card.is-missing:hover,
-html[data-ui-brand="xcsh"] .model-card.is-missing:focus-visible {
-  border-color: rgba(255, 105, 127, 0.74);
-  background:
-    linear-gradient(135deg, rgba(255, 105, 127, 0.27), transparent 46%),
-    rgba(92, 24, 36, 0.4);
-}
-
-html[data-ui-brand="xcsh"] .model-card.is-missing .model-card-status {
-  color: #ffe3e8;
-  border-color: rgba(255, 105, 127, 0.5);
-  background: rgba(255, 105, 127, 0.2);
-}
-
-html[data-ui-brand="xcsh"] .setup-progress-track span {
-  background: linear-gradient(90deg, var(--accent), var(--accent-strong));
-}
-
-html[data-ui-brand="xcsh"] .setup-step-list li.is-active::before {
-  border-color: var(--accent);
-  background: var(--accent);
-  box-shadow: 0 0 0 4px rgba(var(--xcsh-accent-rgb), 0.16);
-}
-
-html[data-ui-brand="xcsh"] .update-progress-panel.is-success {
-  border-color: rgba(var(--xcsh-accent-strong-rgb), 0.38);
-  background: rgba(var(--xcsh-accent-rgb), 0.1);
-}
-
-html[data-ui-brand="xcsh"] button:focus-visible,
-html[data-ui-brand="xcsh"] .button-link:focus-visible,
-html[data-ui-brand="xcsh"] input:focus-visible,
-html[data-ui-brand="xcsh"] select:focus-visible,
-html[data-ui-brand="xcsh"] textarea:focus-visible {
-  box-shadow: 0 0 0 3px rgba(var(--xcsh-accent-rgb), 0.26);
 }
 
 @media (max-width: 560px) {
@@ -6259,7 +6017,7 @@ html[data-theme="light"] .auto-calibration-progress {
   }
 }
 
-/* YU default desktop overview: keep runtime metrics beside the preview. */
+/* TTBOX default desktop overview: keep runtime metrics beside the preview. */
 .dashboard-data {
   display: contents;
 }
@@ -6273,7 +6031,6 @@ html[data-theme="light"] .auto-calibration-progress {
 }
 
 @media (min-width: 921px) {
-  html[data-ui-brand="yu"][data-visual-theme="default"],
   html[data-ui-brand="ttbox"][data-visual-theme="default"] #home-page .dashboard-grid {
     grid-template-columns: minmax(280px, 430px) minmax(0, 1fr);
     grid-template-areas:
@@ -6283,12 +6040,10 @@ html[data-theme="light"] .auto-calibration-progress {
       "hardware hardware";
   }
 
-  html[data-ui-brand="yu"][data-visual-theme="default"],
   html[data-ui-brand="ttbox"][data-visual-theme="default"] #home-page .preview-panel {
     max-width: none;
   }
 
-  html[data-ui-brand="yu"][data-visual-theme="default"],
   html[data-ui-brand="ttbox"][data-visual-theme="default"] #home-page .dashboard-data {
     display: grid;
     grid-area: data;
@@ -6298,7 +6053,6 @@ html[data-theme="light"] .auto-calibration-progress {
     min-width: 0;
   }
 
-  html[data-ui-brand="yu"][data-visual-theme="default"],
   html[data-ui-brand="ttbox"][data-visual-theme="default"] #home-page .dashboard-data-head {
     display: flex;
     grid-column: 1 / -1;
@@ -6306,73 +6060,61 @@ html[data-theme="light"] .auto-calibration-progress {
     gap: 10px;
   }
 
-  html[data-ui-brand="yu"][data-visual-theme="default"],
   html[data-ui-brand="ttbox"][data-visual-theme="default"] #home-page .dashboard-data .quick-metrics {
     display: contents;
     grid-area: auto;
   }
 
-  html[data-ui-brand="yu"][data-visual-theme="default"],
   html[data-ui-brand="ttbox"][data-visual-theme="default"] #home-page .dashboard-data-runtime {
     display: contents;
     grid-area: auto;
   }
 
-  html[data-ui-brand="yu"][data-visual-theme="default"],
   html[data-ui-brand="ttbox"][data-visual-theme="default"] #home-page .quick-metrics > div:nth-child(1) {
     grid-column: 1;
     grid-row: 2;
   }
 
-  html[data-ui-brand="yu"][data-visual-theme="default"],
   html[data-ui-brand="ttbox"][data-visual-theme="default"] #home-page .quick-metrics > div:nth-child(2) {
     grid-column: 2;
     grid-row: 2;
   }
 
-  html[data-ui-brand="yu"][data-visual-theme="default"],
   html[data-ui-brand="ttbox"][data-visual-theme="default"] #home-page .quick-metrics > div:nth-child(3) {
     grid-column: 1;
     grid-row: 3;
   }
 
-  html[data-ui-brand="yu"][data-visual-theme="default"],
   html[data-ui-brand="ttbox"][data-visual-theme="default"] #home-page .quick-metrics > div:nth-child(4) {
     grid-column: 2;
     grid-row: 3;
   }
 
-  html[data-ui-brand="yu"][data-visual-theme="default"],
   html[data-ui-brand="ttbox"][data-visual-theme="default"] #home-page .quick-metrics > div:nth-child(5) {
     grid-column: 1;
     grid-row: 4;
   }
 
-  html[data-ui-brand="yu"][data-visual-theme="default"],
   html[data-ui-brand="ttbox"][data-visual-theme="default"] #home-page .dashboard-data-runtime > .runtime-stat:nth-child(1) {
     grid-column: 1;
     grid-row: 5;
   }
 
-  html[data-ui-brand="yu"][data-visual-theme="default"],
   html[data-ui-brand="ttbox"][data-visual-theme="default"] #home-page .dashboard-data-runtime > .runtime-stat:nth-child(2) {
     grid-column: 2;
     grid-row: 4;
   }
 
-  html[data-ui-brand="yu"][data-visual-theme="default"],
   html[data-ui-brand="ttbox"][data-visual-theme="default"] #home-page .dashboard-data-runtime > .runtime-stat:nth-child(3) {
     grid-column: 1;
     grid-row: 6;
   }
 
-  html[data-ui-brand="yu"][data-visual-theme="default"],
   html[data-ui-brand="ttbox"][data-visual-theme="default"] #home-page .dashboard-data-runtime > .runtime-stat:nth-child(4) {
     grid-column: 2;
     grid-row: 5;
   }
 
-  html[data-ui-brand="yu"][data-visual-theme="default"],
   html[data-ui-brand="ttbox"][data-visual-theme="default"] #home-page .dashboard-data-runtime > .runtime-stat:nth-child(5) {
     grid-column: 2;
     grid-row: 6;
@@ -6380,7 +6122,6 @@ html[data-theme="light"] .auto-calibration-progress {
 }
 
 @media (min-width: 1360px) {
-  html[data-ui-brand="yu"][data-visual-theme="default"],
   html[data-ui-brand="ttbox"][data-visual-theme="default"] #home-page .dashboard-grid {
     grid-template-columns: minmax(300px, 0.95fr) minmax(320px, 1fr) minmax(300px, 0.95fr);
     grid-template-areas:
@@ -6390,7 +6131,6 @@ html[data-theme="light"] .auto-calibration-progress {
       "hardware hardware hardware";
   }
 
-  html[data-ui-brand="yu"][data-visual-theme="default"],
   html[data-ui-brand="ttbox"][data-visual-theme="default"] #home-page .hero-control {
     align-self: stretch;
   }
