@@ -79,8 +79,10 @@ public:
     struct Params {
         std::string model_path;       // .rknn 路径（由 config/ModelStore 提供，不硬编码）
         int core_mask = 0;            // 0=RKNN_NPU_CORE_AUTO（来自 config/model 配置，不写死）
-        bool pass_through = true;     // true=输入零拷贝（要求 dtype/layout 与模型完全一致）；
-                                      // 失败自动回退并记录
+        bool pass_through = true;     // true=INT8/NHWC 启用输入零拷贝（WorkerPool 做 XOR 量化映射）；
+                                      // 其它模型自动回退兼容 I/O
+        bool disable_cache_flush = false;  // true=跳过 CPU↔NPU 缓存同步（降低推理延迟）
+                                          // 可通过 config rknn_disable_cache_flush 开启
         // 测试专用注入点；生产调用不设置，仍走真实 librknnrt。
         std::function<bool(RknnModelInfo*, std::string*)> test_init_hook;
         std::function<bool(std::string*)> test_run_hook;
@@ -111,6 +113,10 @@ public:
     size_t output_memory_size(uint32_t index) const;
     bool zero_copy_ready() const { return zero_copy_ready_; }
     bool run_zero_copy(std::string* error = nullptr);
+
+    // 绑定外部 DMA-BUF 为 RKNN 输入，避免每帧复制到 runtime 自有内存。
+    bool bind_external_input_fd(int fd, void* virt_addr, size_t size,
+                                std::string* error = nullptr);
 
     // 设置输入（零拷贝：直接引用 buf，不复制）。size 为 buf 有效字节。
     bool set_input(const void* buf, size_t size, std::string* error = nullptr);

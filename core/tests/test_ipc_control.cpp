@@ -1,11 +1,11 @@
 // test_ipc_control.cpp — Phase 1 新增 IPC 消息验收：SET_CONFIG / RUNTIME_CONTROL。
 //
-// SET_CONFIG 原子序：params.profile 校验 → 通过回调更新 → 落盘。
-//   - 合法 profile → status=0, applied=true
+// SET_CONFIG 事务序：params.profile 校验 → 持久化成功 → 发布运行配置。
+//   - 合法 profile → status=0, applied=true, persisted=true
 //   - 非法 profile（confidence 越界）→ status=1 + 明确 error，运行配置不被污染
 //   - 缺 params.profile → status=1
 //   - 未注册 handler → status=3
-//   - 落盘失败 → 仍 applied=true 但 persisted=false（内存已生效）
+//   - 落盘失败 → status=1，内存与磁盘均保持旧值
 //   - GET_CONFIG 兼容性：SET 后读回的是新配置
 // RUNTIME_CONTROL：
 //   - start/stop/restart → status=0 且 handler 收到正确 action
@@ -29,7 +29,7 @@ namespace {
 
 std::string tmp_socket_path2() {
 #if defined(_WIN32)
-    return "tcp:39129";
+    return "tcp:0";  // 临时端口：OS 分配唯一端口（见 test_ipc.cpp 同注释）
 #else
     return "/tmp/ttbox_core_test_ctrl_" + std::to_string(static_cast<long>(::getpid())) + ".sock";
 #endif
@@ -71,8 +71,13 @@ ttbox::core::JsonValue last = ttbox::core::JsonValue::object();
             if (persisted) *persisted = false;
             return false;
         }
+        if (!persist_ok) {
+            if (error) *error = "模拟持久化失败";
+            if (persisted) *persisted = false;
+            return false;
+        }
         last = profile;
-        if (persisted) *persisted = persist_ok;
+        if (persisted) *persisted = true;
         return true;
     }
 };
@@ -230,7 +235,7 @@ TEST(ipc_set_config_no_handler_internal) {
     server.stop();
 }
 
-TEST(ipc_set_config_persist_failure_still_applied) {
+TEST(ipc_set_config_persist_failure_rejected_without_apply) {
     ttbox::core::IpcServer server;
     ConfigFixture fx;
     fx.persist_ok = false;  // 模拟落盘失败
@@ -248,13 +253,11 @@ TEST(ipc_set_config_persist_failure_still_applied) {
     CHECK(parsed.ok);
     if (parsed.ok) {
         const auto* status_v = parsed.value.find("status");
-        CHECK(status_v != nullptr && status_v->as_int() == 0);      // 内存已应用
-        const auto* data_v = parsed.value.find("data");
-        if (data_v) {
-            const auto* persisted = data_v->find("persisted");
-            CHECK(persisted != nullptr && persisted->as_bool() == false);  // 但未落盘
-        }
+        CHECK(status_v != nullptr && status_v->as_int() == 1);
+        const auto* err_v = parsed.value.find("error");
+        CHECK(err_v != nullptr && err_v->as_string().find("持久化失败") != std::string::npos);
     }
+    CHECK(!fx.last.is_object() || fx.last.as_object().empty());
     server.stop();
 }
 

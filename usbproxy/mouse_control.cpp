@@ -180,7 +180,7 @@ bool decode_config_payload(const uint8_t* payload, size_t plen) {
 // ── SET_CONFIG 持久化：写回 gadget-config.json（重启后生效）──
 int persist_gadget_config() {
     const char* cfg_path = getenv("USB_PROXY_GADGET_CONFIG_FILE");
-    if (!cfg_path) cfg_path = "/opt/ttbox/usbproxy/gadget-config.json";
+    if (!cfg_path) cfg_path = "gadget-config.json";
     Json::Value root;
     const GadgetConfig& c = g_gadget_config;
     root["usb_vid"] = c.usb_vid;
@@ -252,6 +252,13 @@ void handle_cmd_connection(int fd) {
             if (plen < 2) { send_error(fd, h.request_id, 3, "short button"); break; }
             uint8_t button = payload[0];
             uint8_t action = payload[1];
+            // button 从 1 开始且当前协议只暴露 8 个按钮；先校验再移位，
+            // 避免 button=0/超范围导致未定义行为或污染整个掩码。
+            if (button < 1 || button > 8 ||
+                (action != kActDown && action != kActUp && action != kActClick)) {
+                send_error(fd, h.request_id, 3, "invalid button/action");
+                break;
+            }
             uint8_t bit = static_cast<uint8_t>(1u << (button - 1));
             uint8_t cur = g_state.button_mask.load();
             uint8_t next = cur;
@@ -344,6 +351,31 @@ void handle_event_connection(int fd) {
     ::close(fd);
 }
 
+// ── 连接处理线程（每连接一线程，长连接不再阻塞 accept 循环）─────
+void* cmd_connection_entry(void* arg) {
+    int fd = static_cast<int>(reinterpret_cast<intptr_t>(arg));
+    handle_cmd_connection(fd);
+    return nullptr;
+}
+
+void* event_connection_entry(void* arg) {
+    int fd = static_cast<int>(reinterpret_cast<intptr_t>(arg));
+    handle_event_connection(fd);
+    return nullptr;
+}
+
+static bool spawn_connection(void* (*entry)(void*), int fd) {
+    pthread_t tid;
+    if (pthread_create(&tid, nullptr, entry,
+                       reinterpret_cast<void*>(static_cast<intptr_t>(fd))) != 0) {
+        fprintf(stderr, "pthread_create(connection) failed: %s\n", strerror(errno));
+        ::close(fd);
+        return false;
+    }
+    pthread_detach(tid);
+    return true;
+}
+
 // ── 监听线程：accept 循环 ────────────────────────────────────────
 void* cmd_listen_loop(void* arg) {
     apply_rt_thread_policy();  // RT 线程
@@ -356,7 +388,7 @@ void* cmd_listen_loop(void* arg) {
             ::usleep(50000);
             continue;
         }
-        handle_cmd_connection(cfd);
+        spawn_connection(cmd_connection_entry, cfd);
     }
     return nullptr;
 }
@@ -372,13 +404,31 @@ void* event_listen_loop(void* arg) {
             ::usleep(50000);
             continue;
         }
-        handle_event_connection(cfd);
+        spawn_connection(event_connection_entry, cfd);
     }
     return nullptr;
 }
 
 int create_listen_socket(const char* path) {
-    ::unlink(path);
+    // Do not unlink a socket that is already being served.  YU and TTBOX use
+    // compatible socket names on some boards; replacing a live socket here
+    // would silently steal the other system's mouse-control channel.
+    if (::access(path, F_OK) == 0) {
+        int probe = ::socket(AF_UNIX, SOCK_SEQPACKET, 0);
+        if (probe >= 0) {
+            sockaddr_un probe_addr{};
+            probe_addr.sun_family = AF_UNIX;
+            std::strncpy(probe_addr.sun_path, path, sizeof(probe_addr.sun_path) - 1);
+            if (::connect(probe, reinterpret_cast<const sockaddr*>(&probe_addr),
+                          sizeof(probe_addr)) == 0) {
+                ::close(probe);
+                fprintf(stderr, "refusing to replace active socket: %s\n", path);
+                return -1;
+            }
+            ::close(probe);
+        }
+        ::unlink(path);  // stale socket left by an unclean shutdown
+    }
     int fd = ::socket(AF_UNIX, SOCK_SEQPACKET, 0);
     if (fd < 0) { perror("socket"); return -1; }
     sockaddr_un addr{};
@@ -411,7 +461,12 @@ int mouse_control_start(const std::string& cmd_socket,
     g_srv.cmd_listen_fd = create_listen_socket(cmd_socket.c_str());
     if (g_srv.cmd_listen_fd < 0) return -1;
     g_srv.event_listen_fd = create_listen_socket(event_socket.c_str());
-    if (g_srv.event_listen_fd < 0) { ::close(g_srv.cmd_listen_fd); return -1; }
+    if (g_srv.event_listen_fd < 0) {
+        ::close(g_srv.cmd_listen_fd);
+        ::unlink(cmd_socket.c_str());
+        g_srv.cmd_listen_fd = -1;
+        return -1;
+    }
 
     g_srv.running.store(true);
     if (pthread_create(&g_srv.cmd_thread, nullptr, cmd_listen_loop,
@@ -454,9 +509,13 @@ void mouse_control_stop() {
 // 布局: [0]=report_id, [1..2]=buttons u16 LE, [x_offset..+2]=X, [y_offset..+2]=Y
 bool mouse_control_merge_report(uint8_t* data, uint32_t len) {
     if (!g_state.mouse_control_enabled.load()) return false;
+    // 只合并真正的鼠标报告（report_id + report_len 精确匹配），
+    // 防止键盘/消费类/厂商报告被当成鼠标 X/Y 改写。
+    const uint8_t report_rid = g_state.report_id.load();
+    const int rlen = g_state.report_len.load();
+    if (len != static_cast<uint32_t>(rlen) || data[0] != report_rid) return false;
     int xo = g_state.x_offset.load();
     int yo = g_state.y_offset.load();
-    int rl = g_state.report_len.load();
     if (xo < 1 || yo < 1 || xo + 2 > static_cast<int>(len) ||
         yo + 2 > static_cast<int>(len)) {
         return false;
@@ -480,7 +539,6 @@ bool mouse_control_merge_report(uint8_t* data, uint32_t len) {
     write_i16(yo, read_i16(yo) + dy);
     g_state.merge_count.fetch_add(1);
     g_state.last_move_ts_us.store(now_us());
-    (void)rl;
     return true;
 }
 
@@ -488,6 +546,16 @@ bool mouse_control_merge_report(uint8_t* data, uint32_t len) {
 // BUTTON_EVENT payload = <BBBQ button, pressed(1=down/0=up), mask, timestamp_ns
 void mouse_control_notify_physical_report(const uint8_t* data, uint32_t len) {
     if (!g_state.mouse_control_enabled.load()) return;
+    // 只解析真正的鼠标报告；键盘/厂商/消费类报告的 data[1..2] 不是按钮掩码。
+    const uint8_t report_rid = g_state.report_id.load();
+    const int rlen = g_state.report_len.load();
+    if (len != static_cast<uint32_t>(rlen) || data[0] != report_rid) return;
+    static std::atomic<int> report_samples{0};
+    if (report_samples.fetch_add(1) < 5) {
+        fprintf(stderr, "[mouse_control] phys_report len=%u first12:", len);
+        for (uint32_t i = 0; i < len && i < 12; ++i) fprintf(stderr, " %02x", data[i]);
+        fprintf(stderr, "\n");
+    }
     // Logitech 布局: [1..2] buttons u16 LE；其他布局退化读取 [1]
     uint8_t mask = 0;
     if (len >= 3) {

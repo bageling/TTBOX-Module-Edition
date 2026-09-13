@@ -8,9 +8,12 @@
 #include <sys/ioctl.h>
 #include <linux/input.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/un.h>
 #include <cerrno>
 #include <cstring>
+#include <chrono>
+#include <thread>
 #endif
 
 namespace ttbox::core::input {
@@ -20,6 +23,7 @@ constexpr uint16_t kMagic = 0x4F50;
 constexpr uint8_t kVersion = 1;
 constexpr uint8_t kSubscribeReq = 8;
 constexpr uint8_t kSubscribeAck = 9;
+constexpr uint8_t kStateSnapshot = 10;
 constexpr uint8_t kButtonEvent = 11;
 #pragma pack(push, 1)
 struct Header { uint16_t magic; uint8_t version; uint8_t type; uint32_t request_id; };
@@ -50,13 +54,17 @@ bool PhysicalMouseReader::find_device(std::string* out) const {
 #endif
 }
 
-bool PhysicalMouseReader::start_event_socket(std::string* error) {
+bool PhysicalMouseReader::open_event_socket(std::string* error) {
 #if defined(_WIN32)
  (void)error; return false;
 #else
- event_socket_path_ = "/run/orangepi-mouse-passthrough/event.sock";
+ if(event_socket_path_.empty()) event_socket_path_="/run/ttbox-mouse-passthrough/event.sock";
+ if(event_fd_>=0){::close(event_fd_);event_fd_=-1;}
  event_fd_ = ::socket(AF_UNIX, SOCK_SEQPACKET, 0);
  if (event_fd_ < 0) { if(error)*error="创建 usb-proxy event socket 失败"; return false; }
+ struct timeval tv{};
+ tv.tv_sec = 0; tv.tv_usec = 500000;
+ ::setsockopt(event_fd_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
  sockaddr_un addr{}; addr.sun_family=AF_UNIX;
  if(event_socket_path_.size() >= sizeof(addr.sun_path)) { if(error)*error="event socket 路径过长"; close(event_fd_); event_fd_=-1; return false; }
  std::memcpy(addr.sun_path,event_socket_path_.c_str(),event_socket_path_.size()+1);
@@ -67,9 +75,15 @@ bool PhysicalMouseReader::start_event_socket(std::string* error) {
  if(n<static_cast<ssize_t>(sizeof(Header))){if(error)*error="usb-proxy 按键订阅响应过短";close(event_fd_);event_fd_=-1;return false;}
  Header ack{};std::memcpy(&ack,response,sizeof(ack));
  if(ack.magic!=kMagic||ack.version!=kVersion||ack.type!=kSubscribeAck){if(error)*error="usb-proxy 按键订阅响应不匹配";close(event_fd_);event_fd_=-1;return false;}
- std::fprintf(stderr, "PhysicalMouseReader: usb-proxy event.sock subscribed\\n");
- event_thread_=std::thread(&PhysicalMouseReader::event_socket_loop,this); return true;
+ return true;
 #endif
+}
+
+bool PhysicalMouseReader::start_event_socket(std::string* error) {
+    if (!open_event_socket(error)) return false;
+    std::fprintf(stderr, "PhysicalMouseReader: usb-proxy event.sock subscribed\\n");
+    event_thread_ = std::thread(&PhysicalMouseReader::event_socket_loop, this);
+    return true;
 }
 
 bool PhysicalMouseReader::start(const std::string& requested,std::string* error){
@@ -83,9 +97,6 @@ bool PhysicalMouseReader::start(const std::string& requested,std::string* error)
      std::fprintf(stderr, "PhysicalMouseReader: using usb-proxy event.sock\\n");
      if(!start_event_socket(error)){std::fprintf(stderr, "PhysicalMouseReader: event.sock fallback failed: %s\\n", error ? error->c_str() : "unknown");running_=false;return false;}
      return true;
- }
- if (device_.empty()) {
-     std::fprintf(stderr, "PhysicalMouseReader: evdev mouse candidate=%s\\n", device_.c_str());
  }
  fd_=open(device_.c_str(),O_RDONLY|O_NONBLOCK);
  if(fd_<0){
@@ -118,12 +129,54 @@ void PhysicalMouseReader::loop(){
 void PhysicalMouseReader::event_socket_loop(){
 #if !defined(_WIN32)
  unsigned char packet[128]{};
- while(running_.load(std::memory_order_acquire) && event_fd_>=0){
+ auto last_reconnect_log = std::chrono::steady_clock::now() - std::chrono::seconds(1);
+ while(running_.load(std::memory_order_acquire)){
+   if(event_fd_<0){
+     // usb-proxy 重启/退出后自动重连；断开瞬间先 fail-closed 清空热键位，
+     // 防止旧按键状态把注入门永久打开。
+     buttons_.store(0,std::memory_order_release);
+     std::string err;
+     if(!open_event_socket(&err)){
+       const auto now = std::chrono::steady_clock::now();
+       if (now - last_reconnect_log >= std::chrono::seconds(1)) {
+         std::fprintf(stderr, "PhysicalMouseReader: event.sock reconnect failed, retry\\n");
+         last_reconnect_log = now;
+       }
+       std::this_thread::sleep_for(std::chrono::milliseconds(100));
+       continue;
+     }
+     std::fprintf(stderr, "PhysicalMouseReader: usb-proxy event.sock reconnected\\n");
+   }
    const ssize_t n=::recv(event_fd_,packet,sizeof(packet),0);
-   if(n<=0){if(running_.load())usleep(1000);continue;}
-   if(n<static_cast<ssize_t>(sizeof(Header)+11))continue;
+   // 服务端每 100ms 推一次状态快照；500ms 内无任何数据说明连接已陈旧，
+   // 主动断开重连，避免永久卡在失效 socket 上。
+   if(n<0 && (errno==EAGAIN || errno==EWOULDBLOCK)){
+     if(!running_.load())break;
+     buttons_.store(0,std::memory_order_release);
+     ::shutdown(event_fd_,SHUT_RDWR);
+     ::close(event_fd_);
+     event_fd_=-1;
+     std::this_thread::sleep_for(std::chrono::milliseconds(100));
+     continue;
+   }
+   if(n<=0){
+     if(!running_.load())break;
+     buttons_.store(0,std::memory_order_release);
+     ::shutdown(event_fd_,SHUT_RDWR);
+     ::close(event_fd_);
+     event_fd_=-1;
+     std::this_thread::sleep_for(std::chrono::milliseconds(100));
+     continue;
+   }
+   if(n<static_cast<ssize_t>(sizeof(Header)+9))continue;
    Header h{};std::memcpy(&h,packet,sizeof(h));
-   if(h.magic!=kMagic||h.version!=kVersion||h.type!=kButtonEvent)continue;
+   if(h.magic!=kMagic||h.version!=kVersion)continue;
+   if(h.type==kStateSnapshot){
+      const unsigned char mask=packet[sizeof(Header)];
+      buttons_.store(static_cast<uint16_t>(mask),std::memory_order_release);
+      continue;
+   }
+   if(h.type!=kButtonEvent||n<static_cast<ssize_t>(sizeof(Header)+11))continue;
    const unsigned char button=packet[8]; const unsigned char pressed=packet[9]; const unsigned char mask=packet[10];
    (void)button;
    buttons_.store(static_cast<uint16_t>(mask),std::memory_order_release);

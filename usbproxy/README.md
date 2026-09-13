@@ -30,7 +30,7 @@ AI (MOVE_CMD) ──▶ cmd.sock ──▶ usbproxy ──▶ Raw Gadget ──�
 
 ## 协议（自研二进制协议）
 
-- 传输：Unix `SOCK_SEQPACKET`，`/run/orangepi-mouse-passthrough/`
+- 传输：Unix `SOCK_SEQPACKET`，`/run/ttbox-mouse-passthrough/`
 - 包头：`<HBBI` = magic 0x4F50 / version 1 / type / request_id
 - MOVE_CMD=4：`<iii` dx/dy/wheel（20 字节）
 - BUTTON_CMD=5：`<BB` button/action

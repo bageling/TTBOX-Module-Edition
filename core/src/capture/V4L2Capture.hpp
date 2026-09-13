@@ -67,7 +67,7 @@ class V4L2Capture : public capture::ICapture {
 public:
     struct Params {
         std::string device = "/dev/video0";
-        uint32_t num_buffers = 4;   // 请求 buffer 数（以驱动实际为准，实际更少时降级）
+        uint32_t num_buffers = 8;   // 请求 buffer 数（以驱动实际为准，实际更少时降级）
         int poll_timeout_ms = 1000; // poll 超时（ms）
         // 可选 V4L2 Selection/Crop；0 表示不请求硬件裁剪。
         uint32_t crop_x = 0;
@@ -144,6 +144,12 @@ private:
     uint32_t buffer_count_ = 0;
     int fd_ = -1;
     bool opened_ = false;
+
+    // 滚动 1s 窗口帧率统计（仅 capture_loop 线程访问）。
+    // 用滚动窗口而不是“累计帧数/会话耗时”，否则采集卡死后累计均值仍显示
+    // 冻结前的 240fps，Web 会把停流误判成健康。
+    uint64_t fps_window_frames_ = 0;
+    double fps_window_start_ms_ = 0.0;
 };
 
 }  // namespace ttbox::core

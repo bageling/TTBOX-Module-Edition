@@ -39,6 +39,8 @@ struct PipelineMetrics {
     size_t dropped_frames = 0; // 丢弃帧数（latest-frame 语义，被新帧覆盖）
     uint64_t frames_total = 0; // 已发布帧总数（capture_frames）
     uint64_t infer_total = 0;  // 推理完成帧总数（worker published 累计）
+    uint64_t last_frame = 0;        // 最近一次 AimThread 消费帧号（诊断）
+    uint64_t last_timestamp_us = 0; // 该帧采集时间戳（us，诊断）
     // 鼠标/瞄准链路（G1-2：AimThread 真实状态）
     int32_t mouse_dx = 0;      // 最近一次注入 DX（int16 语义）
     int32_t mouse_dy = 0;      // 最近一次注入 DY

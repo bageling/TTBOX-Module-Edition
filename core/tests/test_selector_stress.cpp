@@ -185,6 +185,26 @@ TEST(selector_priority_disabled_distance_wins) {
     CHECK(r.valid);
     CHECK_EQ(r.box.class_id, 0);  // 距离最近优先
 }
+
+// 激活切换后旧 track 必须释放：连续 teleport 到不同位置应始终只有一个激活轨迹，
+// 且轨迹总量受 max_tracks 上限约束（旧实现 active 轨迹只增不清）。
+TEST(selector_switch_releases_old_active_tracks) {
+    TargetSelector sel;
+    auto cfg = make_cfg();
+    for (int i = 0; i < 150; ++i) {
+        // 每帧把目标放到不同远处位置，强制 score 层不断新建/切换 track。
+        const float cx = 200.0f + static_cast<float>(i % 60) * 5.0f;
+        const float cy = 160.0f + static_cast<float>((i / 60) % 40) * 3.0f;
+        auto r = sel.select({box(cx, cy, 40, 80)}, cfg, static_cast<uint32_t>(100 + i * 7));
+        CHECK(r.valid);
+        size_t active_count = 0;
+        for (const auto& t : sel.tracks()) {
+            if (t.active) ++active_count;
+        }
+        CHECK_EQ(active_count, 1u);
+        CHECK(sel.tracks().size() <= static_cast<size_t>(cfg.max_tracks));
+    }
+}
 #include <cstdio>
 
 int main() {

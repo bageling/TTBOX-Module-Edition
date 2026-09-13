@@ -6,7 +6,7 @@
 #include "device-libusb.h"
 #include "proxy.h"
 #include "misc.h"
-#include "mouse_control.h"
+#include "mouse_control.hpp"
 #include "synthetic.h"
 
 int verbose_level = 0;
@@ -20,8 +20,8 @@ Json::Value injection_config;
 // ── mouse_control（自研通讯层）──
 bool enable_mouse_control = false;
 bool synthetic_mode = false;
-std::string mouse_cmd_socket = "/run/orangepi-mouse-passthrough/cmd.sock";
-std::string mouse_event_socket = "/run/orangepi-mouse-passthrough/event.sock";
+std::string mouse_cmd_socket = "/run/ttbox-mouse-passthrough/cmd.sock";
+std::string mouse_event_socket = "/run/ttbox-mouse-passthrough/event.sock";
 
 bool customized_config_enabled = false;
 std::string customized_config_file = "config.json";

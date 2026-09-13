@@ -171,7 +171,8 @@ void dump_value(std::string& out, const JsonValue& v) {
             double d = v.as_number();
             if (std::isnan(d) || std::isinf(d)) {
                 out += "null";
-            } else if (d == static_cast<int64_t>(d) && std::fabs(d) < 1e15) {
+            } else if (d == static_cast<int64_t>(d) &&
+                       std::fabs(d) <= 9007199254740991.0) {
                 out += std::to_string(static_cast<int64_t>(d));
             } else {
                 char buf[32];

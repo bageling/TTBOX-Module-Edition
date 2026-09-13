@@ -29,11 +29,14 @@ struct RgaMetrics {
     std::atomic<uint64_t> frames{0};      // process 调用次数
     std::atomic<uint64_t> ok_frames{0};   // 成功帧数
     std::atomic<uint64_t> error_frames{0};
+    std::atomic<uint64_t> single_ok{0};   // 单段 improcess 成功帧数
+    std::atomic<uint64_t> fallback_count{0}; // 单段失败回退两段次数
     // 累计耗时（us）
     std::atomic<uint64_t> import_sum_us{0};
     std::atomic<uint64_t> crop_sum_us{0};
     std::atomic<uint64_t> resize_sum_us{0};
     std::atomic<uint64_t> total_sum_us{0};
+    std::atomic<uint64_t> single_sum_us{0};
     // 最近一次耗时（us）
     std::atomic<uint32_t> last_import_us{0};
     std::atomic<uint32_t> last_crop_us{0};
@@ -61,6 +64,8 @@ public:
         // 输出颜色顺序（模型输入要求，来自 config/model，不写死）：
         //   0 = BGR888（OpenCV 系模型，如黄瓦/yolo261n）；1 = RGB888（PIL/torch 系模型，如 v26m）
         int out_color = 0;
+        // true=improcess 单段完成 crop+resize（失败自动回退 imcrop+imresize）
+        bool single_pass = true;
         // A-8 ROI：屏幕截取区域（Capture ROI ≠ 模型输入尺寸）。
         //   roi_w/h == 0 = 未启用（保持 center_crop 原语义）；启用时裁剪该矩形后 resize 到模型输入。
         uint32_t roi_x = 0, roi_y = 0, roi_w = 0, roi_h = 0;

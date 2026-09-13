@@ -35,7 +35,10 @@ const AIM_PROFILE_AXIS_OFFSET_MAX = 1;
 const AIM_PROFILE_FOV_SCALE_MIN = 0.1;
 const AIM_PROFILE_FOV_SCALE_MAX = 1;
 const CROP_SIZE_OPTIONS = [192, 256, 320, 416, 640];
-const CROP_SIZE_MIN = 1;
+// 下限对齐最小模型输入档（192）。此前为 1，导致任何 0/空/异常值被 clamp 成
+// 1×1 退化配置，写回后端后让 AI ROI 缩成 1 像素（推理停摆）+ 预览裁成 1×1，
+// 而系统零报错。抬高下限后，UI 永远产生不了退化尺寸（与后端 fail-closed 硬门槛一致）。
+const CROP_SIZE_MIN = 192;
 const CROP_SIZE_MAX = 1080;
 const CAPTURE_CROP_OFFSET_MIN = -150;
 const CAPTURE_CROP_OFFSET_MAX = 150;
@@ -1086,7 +1089,7 @@ async function runFirstActivationSetup() {
   const displayResult = await api("/api/hardware/display", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ config: displayConfig, apply: true, patch_boot_image: false, reboot_after_apply: false }),
+    body: JSON.stringify({ config: displayConfig, apply: true, patch_boot_image: true, reboot_after_apply: false }),
   });
   populateDisplayHardware({
     available: true,
@@ -7730,6 +7733,11 @@ async function installFullUpdateAfterActivation() {
 }
 
 function renderModelPanel(models, selectedModelId) {
+  const nextSignature = `${modelListSignature(models)}\u001e${selectedModelId || ""}\u001e${state.uiBrand}`;
+  if (state.modelPanelRenderSignature === nextSignature) {
+    return;
+  }
+  state.modelPanelRenderSignature = nextSignature;
   const availableModels = visibleModelLibraryModels(models);
   const currentModel = availableModels.find((model) => model.id === selectedModelId);
   const name = $("modelCurrentName");
@@ -7836,12 +7844,17 @@ function renderModelImportGameSuggestions(games = state.modelGameOptions) {
 }
 
 function renderModelGameFilters(models) {
-  const filters = $("modelGameFilters");
   const games = uniqueModelGames(models);
   if (!games.includes(state.modelGameFilter) && state.modelGameFilter !== "all") {
     state.modelGameFilter = "all";
   }
+  const nextSignature = `${modelListSignature(models)}\u001e${state.modelGameFilter}`;
+  if (state.modelGameFiltersRenderSignature === nextSignature) {
+    return;
+  }
+  state.modelGameFiltersRenderSignature = nextSignature;
   renderModelImportGameSuggestions(games);
+  const filters = $("modelGameFilters");
   if (!filters) {
     return;
   }
@@ -7976,13 +7989,18 @@ async function refreshRemoteModels({ promptOnFailure = true, toastOnSuccess = fa
 }
 
 function renderModelBackendFilters(models) {
-  const filters = $("modelBackendFilters");
   const allowedFilters = shouldShowCloudEncryptedModelsInLibrary()
     ? ["all", "rknn", "hef", "remote", "cloud_encrypted"]
     : ["all", "rknn", "hef", "remote"];
   if (!allowedFilters.includes(state.modelBackendFilter)) {
     state.modelBackendFilter = "all";
   }
+  const nextSignature = `${modelListSignature(models)}\u001e${state.modelBackendFilter}\u001e${state.uiBrand}`;
+  if (state.modelBackendFiltersRenderSignature === nextSignature) {
+    return;
+  }
+  state.modelBackendFiltersRenderSignature = nextSignature;
+  const filters = $("modelBackendFilters");
   if (!filters) {
     return;
   }
@@ -8498,7 +8516,7 @@ function setModelGameBindingOpen(modelId) {
     state.modelRknnConcurrencyBindingOpenId = "";
     state.modelHailoPipelineBindingOpenId = "";
   }
-  rerenderCurrentModels();
+  syncModelCardBindingOpenState();
 }
 
 function setModelPresetBindingOpen(modelId) {
@@ -8509,7 +8527,7 @@ function setModelPresetBindingOpen(modelId) {
     state.modelRknnConcurrencyBindingOpenId = "";
     state.modelHailoPipelineBindingOpenId = "";
   }
-  rerenderCurrentModels();
+  syncModelCardBindingOpenState();
 }
 
 function setModelRemoteFrameBindingOpen(modelId) {
@@ -8520,7 +8538,7 @@ function setModelRemoteFrameBindingOpen(modelId) {
     state.modelRknnConcurrencyBindingOpenId = "";
     state.modelHailoPipelineBindingOpenId = "";
   }
-  rerenderCurrentModels();
+  syncModelCardBindingOpenState();
 }
 
 function setModelRknnConcurrencyBindingOpen(modelId) {
@@ -8531,7 +8549,7 @@ function setModelRknnConcurrencyBindingOpen(modelId) {
     state.modelRemoteFrameBindingOpenId = "";
     state.modelHailoPipelineBindingOpenId = "";
   }
-  rerenderCurrentModels();
+  syncModelCardBindingOpenState();
 }
 
 function setModelHailoPipelineBindingOpen(modelId) {
@@ -8542,7 +8560,53 @@ function setModelHailoPipelineBindingOpen(modelId) {
     state.modelRemoteFrameBindingOpenId = "";
     state.modelRknnConcurrencyBindingOpenId = "";
   }
-  rerenderCurrentModels();
+  syncModelCardBindingOpenState();
+}
+
+function setModelCardBindingOpenState(container, listId, open) {
+  if (!container) {
+    return;
+  }
+  container.classList.toggle("is-open", open);
+  const list = document.getElementById(listId);
+  if (list) {
+    list.hidden = !open;
+  }
+  const button = container.querySelector("[aria-expanded]");
+  if (button) {
+    button.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+}
+
+function syncModelCardBindingOpenState() {
+  document.querySelectorAll(".model-card").forEach((card) => {
+    const modelId = card.dataset.modelId || "";
+    setModelCardBindingOpenState(
+      card.querySelector(".model-game-binding"),
+      `modelGameList-${modelId}`,
+      state.modelGameBindingOpenId === modelId
+    );
+    setModelCardBindingOpenState(
+      card.querySelector(".model-remote-frame-binding"),
+      `modelRemoteFrameList-${modelId}`,
+      state.modelRemoteFrameBindingOpenId === modelId
+    );
+    setModelCardBindingOpenState(
+      card.querySelector(".model-rknn-concurrency-binding"),
+      `modelRknnConcurrencyList-${modelId}`,
+      state.modelRknnConcurrencyBindingOpenId === modelId
+    );
+    setModelCardBindingOpenState(
+      card.querySelector(".model-hailo-pipeline-binding"),
+      `modelHailoPipelineList-${modelId}`,
+      state.modelHailoPipelineBindingOpenId === modelId
+    );
+    setModelCardBindingOpenState(
+      card.querySelector(".model-preset-combobox"),
+      `modelPresetList-${modelId}`,
+      state.modelPresetBindingOpenId === modelId
+    );
+  });
 }
 
 function renderModels(payload, selectedModelId) {
@@ -8569,12 +8633,9 @@ function renderModels(payload, selectedModelId) {
   if (state.modelHailoPipelineBindingOpenId && !models.some((model) => model.id === state.modelHailoPipelineBindingOpenId)) {
     state.modelHailoPipelineBindingOpenId = "";
   }
-  if (state.config && state.config.model_id !== nextSelected) {
-    state.config = { ...state.config, model_id: nextSelected };
-  }
-  if (state.data && state.data.config && state.data.config.model_id !== nextSelected) {
-    state.data.config = { ...state.data.config, model_id: nextSelected };
-  }
+  // 只渲染，不写回：模型列表缺失/过滤时绝不能把本地 config.model_id 改成
+  // 第一个可用模型，否则下一次配置保存会带着这个假选中值去 PUT /api/config，
+  // 把板端真实激活模型清掉。真正切换模型只能走 /api/models/select。
   state.modelListSignature = nextSignature;
   renderModelGameFilters(models);
   renderModelBackendFilters(models);
@@ -8586,16 +8647,14 @@ function renderModels(payload, selectedModelId) {
     state.modelGameFilter,
     state.modelBackendFilter,
     state.presetListSignature || presetListSignature(state.presetNames || []),
-    state.modelPresetBindingOpenId,
-    state.modelGameBindingOpenId,
-    state.modelRemoteFrameBindingOpenId,
-    state.modelRknnConcurrencyBindingOpenId,
-    state.modelHailoPipelineBindingOpenId,
   ].join("\u001e");
   if (state.modelCardsRenderSignature !== nextCardsRenderSignature) {
     state.modelCardsRenderSignature = nextCardsRenderSignature;
     renderModelCards(models, nextSelected);
   }
+  // renderModelCards 重建 DOM 后把展开的绑定下拉重新同步回去，避免列表刷新
+  // 时“选项乱飞”（用户正展开的预设/游戏/并发菜单被重绘重置）。
+  syncModelCardBindingOpenState();
 
   const nextClassSignature = currentModelClassRenderSignature(nextSelected);
   if (state.configReady && state.aimClassRenderSignature && state.aimClassRenderSignature !== nextClassSignature) {
@@ -11073,6 +11132,17 @@ function bindEvents() {
       radio.addEventListener("change", updateModelImportMode);
     });
     updateModelImportMode();
+    async function waitForOnnxConversion({ intervalMs = 3000, maxWaitMs = 20 * 60 * 1000 } = {}) {
+      const deadline = Date.now() + maxWaitMs;
+      while (Date.now() < deadline) {
+        const status = await api("/api/models/convert-status");
+        if (status && (status.state === "success" || status.state === "failed")) {
+          return status;
+        }
+        await new Promise((resolve) => setTimeout(resolve, intervalMs));
+      }
+      return { state: "failed", error: "ONNX 转换超时（20 分钟）" };
+    }
     modelImportForm.addEventListener("submit", (event) => {
       event.preventDefault();
       const form = event.currentTarget;
@@ -11092,6 +11162,13 @@ function bindEvents() {
             method: "POST",
             body: formData,
           });
+          if (importType === "onnx") {
+            setModelImportStatus("importing", "ONNX 转换中，请保持页面打开...");
+            const conv = await waitForOnnxConversion();
+            if (!conv || conv.state !== "success") {
+              throw new Error((conv && conv.error) ? `ONNX 转换失败: ${conv.error}` : "ONNX 转换失败");
+            }
+          }
           if (importType === "remote_onnx") {
             state.modelBackendFilter = "remote";
             await api("/api/remote/models");

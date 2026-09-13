@@ -81,6 +81,7 @@ bool Preprocess::init(const PreprocessConfig& config, std::string* error) {
         params.output_height = config_.detect_size.height;
         params.center_crop = config_.center_crop;
         params.out_color = config_.color_order;
+        params.single_pass = config_.single_pass;
         params.roi_x = config_.crop_x;
         params.roi_y = config_.crop_y;
         params.roi_w = config_.crop_width;

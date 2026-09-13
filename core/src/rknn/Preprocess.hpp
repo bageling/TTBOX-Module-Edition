@@ -27,6 +27,7 @@ struct PreprocessConfig {
     PreprocessBackend backend = PreprocessBackend::kRga;
     bool center_crop = true;
     int color_order = 0;  // 0=BGR, 1=RGB
+    bool single_pass = true;  // RGA 单段 crop+resize（失败自动回退两段）
     uint32_t crop_x = 0;
     uint32_t crop_y = 0;
     uint32_t crop_width = 0;

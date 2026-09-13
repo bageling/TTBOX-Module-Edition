@@ -289,7 +289,7 @@ bool V4L2Capture::open(std::string* error) {
             TTBOX_LOG_INFO(log);
         }
 
-        // ---- 5. REQBUFS（MMAP，默认 4，驱动实际为准）----
+        // ---- 5. REQBUFS（MMAP，默认 8，驱动实际为准）----
         struct v4l2_requestbuffers req {};
         req.count = params_.num_buffers;
         req.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
@@ -424,6 +424,8 @@ bool V4L2Capture::start(std::string* error) {
     metrics_.poll_timeouts = 0;
     metrics_.errors = 0;
     metrics_.capture_fps = 0.0;
+    fps_window_frames_ = 0;
+    fps_window_start_ms_ = 0.0;
 
     running_.store(true);
     capture_thread_ = std::thread(&V4L2Capture::capture_loop, this);
@@ -503,9 +505,25 @@ void V4L2Capture::close() {
 
 void V4L2Capture::capture_loop() {
     using clock = std::chrono::steady_clock;
-    const auto start_time = clock::now();
+
+    // 滚动 1s 窗口：有帧则 +1，无帧（poll 超时/EAGAIN）也照常推进窗口，
+    // 保证停流 1s 后 capture_fps 归零，Web 立刻能看到 degraded 而不是旧均值。
+    auto update_fps_window = [this](bool has_frame) {
+        if (has_frame) ++fps_window_frames_;
+        const double now_ms =
+            std::chrono::duration<double, std::milli>(clock::now().time_since_epoch()).count();
+        if (fps_window_start_ms_ == 0.0) fps_window_start_ms_ = now_ms;
+        const double span = now_ms - fps_window_start_ms_;
+        if (span >= 1000.0) {
+            metrics_.capture_fps.store(fps_window_frames_ * 1000.0 / span);
+            fps_window_frames_ = 0;
+            fps_window_start_ms_ = now_ms;
+        }
+    };
 
     while (running_.load()) {
+        update_fps_window(false);
+
         // 1. 归还可归还的旧 buffer
         release_ready_buffers();
 
@@ -584,16 +602,10 @@ void V4L2Capture::capture_loop() {
             });
         }
         metrics_.capture_frames.fetch_add(1);
+        update_fps_window(true);
 
         // 6. 尝试立即归还
         release_ready_buffers();
-
-        // 7. FPS（滚动 1s 窗口，简单累计）
-        const auto elapsed_s =
-            std::chrono::duration<double>(clock::now() - start_time).count();
-        if (elapsed_s > 0.0) {
-            metrics_.capture_fps.store(static_cast<double>(metrics_.capture_frames.load()) / elapsed_s);
-        }
     }
 }
 

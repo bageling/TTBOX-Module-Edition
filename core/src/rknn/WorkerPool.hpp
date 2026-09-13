@@ -71,9 +71,10 @@ public:
         int id = 0;                 // worker 编号（0..N-1），决定认领 seq % N
         int core_mask = 0;          // 绑定 NPU core（0=auto；多核绑定如 1/2/4）
         std::string model_path;
-        bool pass_through = false;  // A-6 修正：pass_through=1 需 NPU 内部原生布局，
-                                    // 直喂 NHWC/NCHW 均产生错误推理；用 0 由 runtime
-                                    // 转换保证与 Python(rknnlite) 结果一致
+        bool pass_through = false;  // 生产由 config 开启；true=零拷贝+pass_through，
+                                    // INT8/NHWC 时 WorkerPool 必须做 uint8→int8 XOR 转换
+        bool disable_cache_flush = false;  // 跳过 CPU↔NPU 缓存同步，降低推理延迟
+        bool external_dma_input = false; // 实验开关：RGA DMA-BUF 直绑 RKNN，默认关闭
         uint32_t out_w = 0;         // 模型输入尺寸（config）
         uint32_t out_h = 0;
         LatestFrame* latest = nullptr;   // 共享最新帧（capture 提供，非拥有）
@@ -117,6 +118,7 @@ private:
     DetectionGeometryFilter geometry_filter_;
     uint32_t last_seq_ = 0;
     int id_ = -1;
+    int bound_input_dma_fd_ = -1;
     WorkerStats stats_;
     // A-8：热更新跟踪（避免每帧重复设置）
     std::shared_ptr<const RuntimeProfile> applied_profile_;
@@ -128,7 +130,10 @@ public:
     struct Params {
         std::string model_path;
         std::vector<int> worker_cores;  // 每 worker core_mask（长度 = worker 数）
-        bool pass_through = false;      // A-6：false=由 runtime 转换（正确）；true=零拷贝（需内部布局）
+        bool pass_through = false;      // 生产由 config 开启；true=零拷贝+pass_through，
+                                        // INT8/NHWC 时 WorkerPool 负责 uint8→int8 XOR
+        bool external_dma_input = false; // 实验开关：RGA DMA-BUF 直绑 RKNN，默认关闭
+        bool disable_cache_flush = false;  // 跳过 CPU↔NPU 缓存同步，降低推理延迟
         uint32_t out_w = 0;
         uint32_t out_h = 0;
         LatestFrame* latest = nullptr;

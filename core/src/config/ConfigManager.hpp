@@ -34,6 +34,10 @@ public:
 
     const JsonValue& root() const { return root_; }
 
+    // 仅供 Application 在配置原子落盘成功后同步 canonical 内存根节点。
+    // 调用方已完成结构校验；不改变 path/loaded 状态。
+    void replace_root(JsonValue root) { root_ = std::move(root); }
+
 private:
     JsonValue root_ = JsonValue::object();
     bool loaded_ = false;

@@ -163,13 +163,7 @@ int main(int argc, char** argv) {
         profile.mouse.aim_hotkey_mode = 0;
         profile.mouse.kp_x = 0.20f;
         profile.mouse.kp_y = 0.20f;
-        profile.mouse.ki_x = profile.mouse.ki_y = 0.0f;
         profile.mouse.kd_x = profile.mouse.kd_y = 0.0f;
-        profile.mouse.smith_dead_ms = 28.4f;
-        profile.mouse.alpha = 0.8f;
-        profile.mouse.beta = 0.3f;
-        profile.mouse.gamma = 0.1f;
-        profile.mouse.predict_dt_ms = 50.0f;
     }
     runtime_config.update(profile);
     p.runtime_config = &runtime_config;

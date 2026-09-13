@@ -113,6 +113,8 @@ TEST(registry_import_validate_install_activate) {
     CHECK(fx.reg.install("hw320", &err));
     CHECK(fs::exists(fx.root + "/installed/hw320/model.rknn"));
     CHECK(fs::exists(fx.root + "/installed/hw320/manifest.json"));
+    // 同一 staging 内容的安装请求允许幂等重放（例如首次响应在网络中丢失）。
+    CHECK(fx.reg.install("hw320", &err));
 
     // list 可见
     auto models = fx.reg.list();
@@ -138,6 +140,62 @@ TEST(registry_import_validate_install_activate) {
     CHECK(!fs::exists(fx.root + "/installed/hw320"));
     CHECK(fx.reg.list().empty());
     std::remove("/tmp/ttbox_fake_src.rknn");
+}
+
+TEST(registry_install_rejects_model_changed_after_validation) {
+    RegistryFixture fx;
+    fx.reg.set_validator(fake_validator);
+    const std::string fake = make_fake_model("/tmp/ttbox_fake_stale.rknn");
+    ModelManifest m;
+    std::string err;
+    CHECK(fx.reg.import(fake, "stale", m, &err));
+    CHECK(fx.reg.validate("stale", &err));
+
+    // 验证完成后篡改 staging 模型；旧 validation/ok.json 已不属于当前内容。
+    write_text(fx.root + "/staging/stale/model.rknn", "CHANGED-AFTER-VALIDATION");
+    CHECK(!fx.reg.install("stale", &err));
+    CHECK(err.find("VALIDATION_STALE") != std::string::npos);
+    CHECK(!fs::exists(fx.root + "/installed/stale"));
+    std::remove("/tmp/ttbox_fake_stale.rknn");
+}
+
+TEST(registry_revalidate_failure_revokes_old_pass) {
+    RegistryFixture fx;
+    bool validator_ok = true;
+    fx.reg.set_validator([&validator_ok](const std::string& path, JsonValue* metadata,
+                                        std::string* error) {
+        if (!validator_ok) {
+            if (error) *error = "模拟 NPU 加载失败";
+            return false;
+        }
+        return fake_validator(path, metadata, error);
+    });
+    const std::string fake = make_fake_model("/tmp/ttbox_fake_revalidate.rknn");
+    ModelManifest m;
+    std::string err;
+    CHECK(fx.reg.import(fake, "revalidate", m, &err));
+    CHECK(fx.reg.validate("revalidate", &err));
+    CHECK(fs::exists(fx.root + "/staging/revalidate/validation/ok.json"));
+
+    validator_ok = false;
+    CHECK(!fx.reg.validate("revalidate", &err));
+    CHECK(!fs::exists(fx.root + "/staging/revalidate/validation/ok.json"));
+    CHECK(!fx.reg.install("revalidate", &err));
+    CHECK(!fs::exists(fx.root + "/installed/revalidate"));
+    std::remove("/tmp/ttbox_fake_revalidate.rknn");
+}
+
+TEST(registry_activate_rejects_invalid_package_even_if_rknn_loads) {
+    RegistryFixture fx;
+    fx.reg.set_validator(fake_validator);
+    const std::string bad_dir = fx.root + "/broken";
+    make_fake_model(bad_dir + "/model.rknn");
+    // 故意不创建 manifest.json：validator 会认为 RKNN 文件可读，但 Registry 包门槛必须拒绝。
+    std::string err;
+    CHECK(fx.reg.refresh());
+    CHECK(!fx.reg.activate("broken", &err));
+    CHECK(err.find("MODEL_NOT_READY") != std::string::npos);
+    CHECK(fx.reg.active_model().empty());
 }
 
 TEST(registry_activate_failure_restores_old) {
@@ -207,6 +265,12 @@ TEST(registry_scan_rejects_invalid_packages) {
 
     make_fake_model(fx.root + "/good/model.rknn");
     write_text(fx.root + "/good/manifest.json", good_manifest);
+    make_fake_model(fx.root + "/installed/installed_good/model.rknn");
+    write_text(fx.root + "/installed/installed_good/manifest.json",
+               "{\"model_id\":\"installed_good\",\"version\":\"1.0.0\","
+               "\"format\":\"rknn\",\"task\":\"detect\",\"hardware\":\"rk3588\","
+               "\"sha256\":\"" + good_sha + "\",\"input_width\":320,\"input_height\":320,"
+               "\"output_count\":2,\"class_count\":1}");
     make_fake_model(fx.root + "/missing_manifest/model.rknn");
     make_fake_model(fx.root + "/bad_json/model.rknn");
     write_text(fx.root + "/bad_json/manifest.json", "{bad json");
@@ -235,13 +299,16 @@ TEST(registry_scan_rejects_invalid_packages) {
 
     CHECK(fx.reg.refresh());
     auto records = fx.reg.records();
-    CHECK_EQ(records.size(), 7u);
+    CHECK_EQ(records.size(), 8u);
     auto find_record = [&records](const std::string& id) -> const ModelRecord* {
         for (const auto& record : records) if (record.model_id == id) return &record;
         return nullptr;
     };
     const auto* good = find_record("good");
     CHECK(good != nullptr && good->status == ModelStatus::kReady);
+    const auto* installed_good = find_record("installed_good");
+    CHECK(installed_good != nullptr && installed_good->status == ModelStatus::kReady &&
+          installed_good->failure_code.empty());
     const auto* missing_manifest = find_record("missing_manifest");
     CHECK(missing_manifest != nullptr && missing_manifest->failure_code == "MANIFEST_MISSING");
     const auto* bad_json = find_record("bad_json");

@@ -1,7 +1,7 @@
 import socket,struct,time
 def rpc(typ,rid,payload=b""):
     s=socket.socket(socket.AF_UNIX,socket.SOCK_SEQPACKET)
-    s.connect("/run/orangepi-mouse-passthrough/cmd.sock")
+    s.connect("/run/ttbox-mouse-passthrough/cmd.sock")
     s.settimeout(3)
     hdr=struct.pack("<HBBI",0x4F50,1,typ,rid)
     s.sendall(hdr+payload)

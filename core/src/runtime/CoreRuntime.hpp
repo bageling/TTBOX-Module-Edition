@@ -29,6 +29,8 @@ public:
         PreviewModule::Params preview;
         std::shared_ptr<output::IHidOutput> output;
         RuntimeConfig* runtime_config = nullptr;
+        // TTBOX 独立按键事件通道；空值时 PhysicalMouseReader 使用自己的默认值。
+        std::string mouse_event_socket;
         // 第13阶段：链路诊断（config 控制；默认关闭）
         bool pipeline_debug_enabled = false;
         uint32_t pipeline_debug_interval = 60;
@@ -40,6 +42,8 @@ public:
     };
     bool initialize(const Params& params, std::string* error=nullptr);
     bool start(std::string* error=nullptr); void stop(); bool running() const { return running_.load(); }
+    // Hot model switch: only rebuild RKNN worker pool while capture/preview/aim stay alive.
+    bool reload_workers(const WorkerPool::Params& params, std::string* error=nullptr);
     // 只有至少一帧真实 RKNN 推理并成功进入 Decode 后才算模型 ready。
     bool model_ready() const;
     uint64_t model_errors() const;
@@ -52,6 +56,14 @@ public:
 
     // Phase2：低帧实时预览（10fps，独立线程，不影响 AI 流水线）
     PreviewModule* preview() { return preview_.get(); }
+
+    // 采集模块（Application 看门狗用：检测帧数长时间不增长后自动重枚举）
+    V4L2Capture* capture() const { return capture_.get(); }
+
+    // 推理模块已成功处理的总帧数（看门狗用；所有 worker 聚合，无锁原子计数）。
+    uint64_t workers_processed() const {
+        return workers_ ? workers_->total_processed() : 0;
+    }
 private:
     std::unique_ptr<aim::AimTargetMailbox> mailbox_;
     std::unique_ptr<V4L2Capture> capture_;
@@ -63,6 +75,7 @@ private:
     uint32_t pipeline_debug_interval_ = 60;
     bool pid_trace_enabled_ = false;           // 第13阶段：PID Trace
     std::string pid_trace_path_;
+    std::string mouse_event_socket_;
     float prediction_time_s_ = 0.0f;           // 第15阶段：目标预测时域
     aim::AimThread aim_thread_;
     input::PhysicalMouseReader mouse_reader_;

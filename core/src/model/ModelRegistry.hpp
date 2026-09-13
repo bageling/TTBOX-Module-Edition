@@ -82,6 +82,7 @@ struct ModelManifest {
     uint32_t class_count = 0;
     std::vector<std::string> class_names;
     uint32_t rknn_concurrency = 1;
+    std::string worker_cores;
     JsonValue to_json() const;
     static ModelManifest from_json(const JsonValue& v);
 };
@@ -163,6 +164,9 @@ public:
 
     // refresh：重新扫描模型目录并刷新内存快照；不会由每次 API 请求触发。
     bool refresh(std::string* error = nullptr);
+
+    // set_concurrency：更新已安装模型的 RKNN 并发（1~3）并原子写回 manifest。
+    bool set_concurrency(const std::string& model_id, int count, std::string* error = nullptr);
 
     // ---- 路径辅助 ----
     std::string root_dir() const { return root_; }

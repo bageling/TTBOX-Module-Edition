@@ -36,6 +36,13 @@ void usb_raw_init(int fd, enum usb_device_speed speed,
 	strcpy((char *)&arg.device_name[0], device);
 	arg.speed = speed;
 	int rv = ioctl(fd, USB_RAW_IOCTL_INIT, &arg);
+	for (int attempt = 1; rv < 0 && errno == EBUSY && attempt < 10; attempt++) {
+		fprintf(stderr,
+			"ioctl(USB_RAW_IOCTL_INIT): UDC busy, waiting for ownership release "
+			"(attempt %d/10)...\n", attempt);
+		usleep(500000);
+		rv = ioctl(fd, USB_RAW_IOCTL_INIT, &arg);
+	}
 	if (rv < 0) {
 		perror("ioctl(USB_RAW_IOCTL_INIT)");
 		exit(EXIT_FAILURE);
@@ -44,6 +51,13 @@ void usb_raw_init(int fd, enum usb_device_speed speed,
 
 void usb_raw_run(int fd) {
 	int rv = ioctl(fd, USB_RAW_IOCTL_RUN, 0);
+	for (int attempt = 1; rv < 0 && errno == EBUSY && attempt < 10; attempt++) {
+		fprintf(stderr,
+			"ioctl(USB_RAW_IOCTL_RUN): UDC busy, waiting for ownership release "
+			"(attempt %d/10)...\n", attempt);
+		usleep(500000);
+		rv = ioctl(fd, USB_RAW_IOCTL_RUN, 0);
+	}
 	if (rv < 0) {
 		perror("ioctl(USB_RAW_IOCTL_RUN)");
 		exit(EXIT_FAILURE);

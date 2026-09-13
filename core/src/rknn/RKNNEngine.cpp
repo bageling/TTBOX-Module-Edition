@@ -109,7 +109,13 @@ bool RKNNEngine::init(const Params& params, std::string* error) {
     }
 
     // ---- 1. rknn_init：加载模型 + 初始化 runtime ----
-    int rc = rknn_init(&impl_->ctx, const_cast<char*>(params_.model_path.c_str()), 0, 0, nullptr);
+    uint32_t init_flag = 0;
+    if (params_.disable_cache_flush) {
+        init_flag |= RKNN_FLAG_DISABLE_FLUSH_INPUT_MEM_CACHE |
+                     RKNN_FLAG_DISABLE_FLUSH_OUTPUT_MEM_CACHE;
+    }
+    int rc = rknn_init(&impl_->ctx, const_cast<char*>(params_.model_path.c_str()), 0,
+                       init_flag, nullptr);
     if (rc != RKNN_SUCC) {
         if (error) *error = "rknn_init 失败（rc=" + std::to_string(rc) + "）: " + params_.model_path;
         return false;
@@ -213,11 +219,19 @@ bool RKNNEngine::init_zero_copy(std::string* error) {
         return false;
     }
     if (zero_copy_ready_) return true;
-    // 先允许所有已查询的输入布局使用预分配 IO memory；只有 INT8/NHWC
-    // 且明确请求时才开启 pass_through。FLOAT16 模型仍可零拷贝传输，
-    // 但保持 pass_through=0，让 RKNN runtime 负责必要的格式/归一化。
+    // 输入零拷贝只在 INT8/NHWC + pass_through=1 时启用：此时输入 mem 是
+    // 模型原生 int8，WorkerPool 已负责 uint8→int8 XOR 转换。
+    // FP16/UINT8/NCHW 等模型一律回退兼容 I/O（set_input 喂 UINT8，由
+    // runtime 量化），避免把 UINT8 字节直接交给 FP16/int8 mem 造成错位。
     const bool direct_pass_through = params_.pass_through &&
         info_.input_type == RKNN_TENSOR_INT8 && info_.input_fmt == RKNN_TENSOR_NHWC;
+    if (!direct_pass_through) {
+        if (error) {
+            *error = "输入零拷贝仅支持 INT8/NHWC + pass_through，回退兼容 I/O";
+        }
+        TTBOX_LOG_WARN("RKNN 输入零拷贝不适用（非 INT8/NHWC），回退兼容 I/O");
+        return false;
+    }
 
     rknn_tensor_attr input_attr{};
     input_attr.index = 0;
@@ -311,6 +325,54 @@ bool RKNNEngine::run_zero_copy(std::string* error) {
     return true;
 }
 
+bool RKNNEngine::bind_external_input_fd(int fd, void* virt_addr, size_t size,
+                                        std::string* error) {
+    if (!inited_ || !zero_copy_ready_ || !impl_) {
+        if (error) *error = "RKNN 零拷贝输入尚未初始化";
+        return false;
+    }
+    if (fd < 0 || virt_addr == nullptr || size == 0) {
+        if (error) *error = "外部 DMA-BUF 输入参数无效";
+        return false;
+    }
+    rknn_tensor_attr attr{};
+    attr.index = 0;
+    if (rknn_query(impl_->ctx, RKNN_QUERY_INPUT_ATTR, &attr, sizeof(attr)) != RKNN_SUCC) {
+        if (error) *error = "查询 RKNN 输入属性失败";
+        return false;
+    }
+    if (!(params_.pass_through && info_.input_type == RKNN_TENSOR_INT8 &&
+          info_.input_fmt == RKNN_TENSOR_NHWC)) {
+        if (error) *error = "当前模型不满足 INT8/NHWC 直绑定条件";
+        return false;
+    }
+    attr.type = RKNN_TENSOR_INT8;
+    attr.fmt = RKNN_TENSOR_NHWC;
+    attr.pass_through = 1;
+    if (size < attr.size_with_stride) {
+        if (error) *error = "外部 DMA-BUF 小于 RKNN 输入 stride";
+        return false;
+    }
+    auto* external = rknn_create_mem_from_fd(impl_->ctx, fd, virt_addr,
+                                               static_cast<uint32_t>(size), 0);
+    if (!external) {
+        if (error) *error = "rknn_create_mem_from_fd 失败";
+        return false;
+    }
+    if (rknn_set_io_mem(impl_->ctx, external, &attr) != RKNN_SUCC) {
+        rknn_destroy_mem(impl_->ctx, external);
+        if (error) *error = "外部 DMA-BUF 输入绑定失败";
+        return false;
+    }
+    if (impl_->input_mem && impl_->input_mem != external) {
+        rknn_destroy_mem(impl_->ctx, impl_->input_mem);
+    }
+    impl_->input_mem = external;
+    impl_->input_mem_size = size;
+    pass_through_active_ = true;
+    return true;
+}
+
 void RKNNEngine::destroy() {
     if (impl_ && impl_->ctx != 0) {
         if (impl_->input_mem) {
@@ -373,7 +435,9 @@ bool RKNNEngine::set_input(const void* buf, size_t size, std::string* error) {
     in.size = static_cast<uint32_t>(size);
     in.fmt = static_cast<rknn_tensor_format>(info_.input_fmt);
     in.buf = const_cast<void*>(buf);
-    in.pass_through = params_.pass_through ? 1 : 0;
+    // 兼容 I/O 路径始终喂 UINT8 原始像素，pass_through=0 交给 runtime
+    // 做类型转换/量化；与 Python(rknnlite) 行为一致，禁止在此处直通。
+    in.pass_through = 0;
 
     const auto t0 = clock::now();
     const int rc = rknn_inputs_set(impl_->ctx, 1, &in);

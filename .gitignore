@@ -113,6 +113,11 @@ ttbox_*_tmp.json
 # 顶层 sync 包/快照
 sync_board_*.tgz
 
+# 本地审计/调试产物
+build-audit-pytest/
+ttbox_state.json
+ttbox_preview_status.json
+
 
 # ---------- 本地 Windows 宿主构建（第一阶段验证）----------
 /build-win-host/

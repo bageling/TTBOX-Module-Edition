@@ -37,7 +37,14 @@ public:
     // 推进状态机。返回 true 表示本次发生了需要 Reset（controller/tracker）的转换。
     bool update(const AimStateEvent& e, float lost_grace_ms,
                 const LockConfirmConfig& confirm = LockConfirmConfig{});
-    void reset() { state_ = AimState::kIdle; lost_since_ms_ = 0; confirm_count_ = 0; }
+    void reset() {
+        state_ = AimState::kIdle;
+        lost_since_ms_ = 0;
+        was_aiming_ = false;
+        confirm_count_ = 0;
+        hold_conf_ = 0.0f;
+        locked_ = false;
+    }
 
 private:
     AimState state_ = AimState::kIdle;

@@ -3,7 +3,7 @@ hz=int(sys.argv[1]) if len(sys.argv)>1 else 1000
 dur=float(sys.argv[2]) if len(sys.argv)>2 else 1.0
 dx=int(sys.argv[3]) if len(sys.argv)>3 else 1
 s=socket.socket(socket.AF_UNIX,socket.SOCK_SEQPACKET)
-s.connect("/run/orangepi-mouse-passthrough/cmd.sock")
+s.connect("/run/ttbox-mouse-passthrough/cmd.sock")
 s.settimeout(2)
 period=1.0/hz
 start=time.time()

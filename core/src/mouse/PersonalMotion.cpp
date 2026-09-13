@@ -16,7 +16,7 @@ bool PersonalMotion::valid(const PersonalMotionConfig& config) {
     return true;
 }
 
-float PersonalMotion::scale(float error_distance, const PersonalMotionConfig& config) const {
+float PersonalMotion::scale(float error_distance, const PersonalMotionConfig& config) {
     if (!valid(config)) return 1.0f;
     const float normalized = std::clamp(std::fabs(error_distance) / 128.0f, 0.0f, 1.0f);
     const float position = normalized * static_cast<float>(config.knots.size() - 1);

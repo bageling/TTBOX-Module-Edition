@@ -9,7 +9,7 @@
 #include "device-libusb.h"
 #include "proxy.h"
 #include "misc.h"
-#include "mouse_control.h"
+#include "mouse_control.hpp"
 #include "synthetic.h"
 
 #ifdef HAVE_LUA
@@ -787,8 +787,15 @@ void printData(struct usb_raw_transfer_io io, __u8 bEndpointAddress, std::string
 
 void noop_signal_handler(int) { }
 
+// Multiple endpoint threads can observe the same physical disconnect at the
+// same time. Send the cleanup signal only once; otherwise the second SIGINT
+// takes the "force exiting" path before main() can release the UDC cleanly.
+static std::atomic<bool> proxy_stop_requested{false};
+
 static void stop_proxy_after_physical_disconnect()
 {
+	if (proxy_stop_requested.exchange(true, std::memory_order_acq_rel))
+		return;
 	please_stop_ep0 = true;
 	please_stop_eps = true;
 	kill(0, SIGINT);

@@ -100,6 +100,9 @@ public:
     }
     Status status() const;
 private:
+    // 每次 start 都代表一个全新的采集/模型运行世代。必须清除旧模型的目标锁定、
+    // 跟踪、PID、亚像素余数、显示滤波和压枪/拟人状态，禁止 A 模型状态泄漏到 B。
+    void reset_runtime_state();
     void loop();
     AimTargetMailbox* mailbox_ = nullptr;
     std::shared_ptr<output::IHidOutput> output_;

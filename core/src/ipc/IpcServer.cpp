@@ -1,6 +1,7 @@
 // IpcServer.cpp — IPC 服务端/客户端实现（Unix AF_UNIX，Windows TCP loopback）
 #include "ipc/IpcServer.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstring>
@@ -34,7 +35,8 @@ namespace {
 // MSVC 无 ssize_t：Windows 分支统一用 long long 语义的别名。
 using ssize_t = long long;
 // Windows：路径 "tcp:<port>"。返回监听 fd（SOCKET 转 int），失败 -1。
-int listen_tcp(const std::string& path, std::string* error) {
+// bound_port 出参：port==0（临时端口）时回写 OS 实际分配的端口
+int listen_tcp(const std::string& path, std::string* error, int* bound_port = nullptr) {
     static bool ws_inited = []() {
         WSADATA wsa{};
         return WSAStartup(MAKEWORD(2, 2), &wsa) == 0;
@@ -68,6 +70,17 @@ int listen_tcp(const std::string& path, std::string* error) {
         ::closesocket(fd);
         return -1;
     }
+    if (port == 0 && bound_port != nullptr) {
+        // 临时端口：读回 OS 实际分配值（测试专用路径，生产用固定端口不受影响）
+        sockaddr_in actual{};
+        int len = static_cast<int>(sizeof(actual));
+        if (::getsockname(fd, reinterpret_cast<sockaddr*>(&actual), &len) != 0) {
+            if (error) *error = "getsockname() 失败";
+            ::closesocket(fd);
+            return -1;
+        }
+        *bound_port = static_cast<int>(ntohs(actual.sin_port));
+    }
     if (::listen(fd, 8) != 0) {
         if (error) *error = "listen() 失败";
         ::closesocket(fd);
@@ -97,7 +110,11 @@ int connect_tcp(const std::string& path, std::string* error) {
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     addr.sin_port = htons(static_cast<uint16_t>(port));
     if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
-        if (error) *error = "connect() 失败";
+        const int wsa_error = ::WSAGetLastError();
+        if (error) {
+            *error = "connect() 失败 (port=" + port_str + ", WSA=" +
+                     std::to_string(wsa_error) + ")";
+        }
         ::closesocket(fd);
         return -1;
     }
@@ -174,7 +191,9 @@ int connect_unix(const std::string& path, std::string* error) {
 }
 
 ssize_t sock_send(int fd, const void* buf, size_t len) {
-    return ::send(fd, buf, len, 0);
+    // 客户端在 Preview 大响应中途关闭连接时，普通 send 会触发 SIGPIPE，
+    // Linux 默认行为是杀死整个 Core。MSG_NOSIGNAL 把它变成可处理的 EPIPE。
+    return ::send(fd, buf, len, MSG_NOSIGNAL);
 }
 
 ssize_t sock_recv(int fd, void* buf, size_t len) {
@@ -241,14 +260,22 @@ bool IpcServer::start(const std::string& socket_path, std::string* error) {
         return false;
     }
     int fd = -1;
+    std::string effective_path = socket_path;
 #if defined(_WIN32)
-    fd = listen_tcp(socket_path, error);
+    int bound_port = 0;
+    fd = listen_tcp(socket_path, error, &bound_port);
+    // 临时端口（"tcp:0"）：回写 OS 实际分配的端口，后续自举握手与客户端
+    // 都通过 socket_path() 拿到唯一端口——彻底消除多测试用例共用固定端口
+    // 导致的 TIME_WAIT/bind 竞态。
+    if (fd >= 0 && bound_port > 0) {
+        effective_path = "tcp:" + std::to_string(bound_port);
+    }
 #else
     fd = listen_unix(socket_path, error);
 #endif
     if (fd < 0) return false;
 
-    socket_path_ = socket_path;
+    socket_path_ = effective_path;
     listen_fd_ = fd;
     running_.store(true);
     accept_thread_ = std::thread(&IpcServer::accept_loop, this);
@@ -267,14 +294,9 @@ bool IpcServer::start(const std::string& socket_path, std::string* error) {
         std::this_thread::sleep_for(std::chrono::milliseconds(40));
     }
     if (!ready) {
-        running_.store(false);
-        if (accept_thread_.joinable()) accept_thread_.join();
-#if defined(_WIN32)
-        ::closesocket(static_cast<SOCKET>(listen_fd_));
-#else
-        ::close(listen_fd_);
-#endif
-        listen_fd_ = -1;
+        // 统一走 stop()：它会先关闭监听唤醒 accept，再排空所有在途连接。
+        // 旧代码先 join 阻塞在 accept 的线程、后关闭监听，在自举失败路径会死锁。
+        stop();
         if (error) *error = "IPC 自举握手失败: " + probe_error;
         return false;
     }
@@ -306,6 +328,24 @@ void IpcServer::stop() {
         sock_close(listen_fd_);
         listen_fd_ = -1;
     }
+
+    // ---- 排空在途连接线程（防 use-after-free，见 hpp conn_fds_ 注释）----
+    // 持锁 shutdown 所有 fd，唤醒卡在 read_line/sock_recv 的线程；随后通过
+    // 条件变量等到列表真正清空。这里没有“超时后继续析构”的逃生口：只要
+    // 连接线程仍会访问 this，IpcServer 就必须活着。
+    {
+        std::unique_lock<std::mutex> lk(conn_fds_mutex_);
+        for (int fd : conn_fds_) {
+#if defined(_WIN32)
+            ::shutdown(static_cast<SOCKET>(fd), SD_BOTH);
+#else
+            ::shutdown(fd, SHUT_RDWR);
+#endif
+        }
+        conn_fds_cv_.wait(lk, [this] { return conn_fds_.empty(); });
+    }
+    active_connections_.store(0, std::memory_order_release);
+
 #if !defined(_WIN32)
     ::unlink(socket_path_.c_str());
 #endif
@@ -314,6 +354,19 @@ void IpcServer::stop() {
 
 void IpcServer::accept_loop() {
     while (running_.load()) {
+        // 连接数满了就拒绝
+        if (active_connections_.load(std::memory_order_acquire) >= kMaxConnections) {
+            int reject_fd = -1;
+#if defined(_WIN32)
+            SOCKET rc = ::accept(static_cast<SOCKET>(listen_fd_), nullptr, nullptr);
+            reject_fd = rc == INVALID_SOCKET ? -1 : static_cast<int>(rc);
+#else
+            reject_fd = ::accept(listen_fd_, nullptr, nullptr);
+#endif
+            if (reject_fd >= 0) sock_close(reject_fd);
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            continue;
+        }
         int client_fd = -1;
 #if defined(_WIN32)
         SOCKET c = ::accept(static_cast<SOCKET>(listen_fd_), nullptr, nullptr);
@@ -327,7 +380,25 @@ void IpcServer::accept_loop() {
             }
             continue;
         }
-        std::thread([this, client_fd] { handle_connection(client_fd); }).detach();
+        active_connections_.fetch_add(1, std::memory_order_acq_rel);
+        {
+            // 登记在途 fd：stop() 靠它 shutdown 唤醒卡住的连接线程（见 stop 注释）
+            std::lock_guard<std::mutex> lk(conn_fds_mutex_);
+            conn_fds_.push_back(client_fd);
+        }
+        std::thread([this, client_fd] {
+            handle_connection(client_fd);
+            {
+                // 锁内完成所有对 IpcServer 成员的最后访问，再把 fd 从列表移除。
+                // stop() 以“列表为空”为线程已不再访问 this 的完成条件。
+                std::lock_guard<std::mutex> lk(conn_fds_mutex_);
+                sock_close(client_fd);
+                active_connections_.fetch_sub(1, std::memory_order_acq_rel);
+                conn_fds_.erase(std::remove(conn_fds_.begin(), conn_fds_.end(), client_fd),
+                                conn_fds_.end());
+                conn_fds_cv_.notify_all();
+            }
+        }).detach();
     }
 }
 
@@ -344,7 +415,7 @@ void IpcServer::handle_connection(int fd) {
             resp.error = "invalid JSON request: " + parsed.error;
         } else if (!parsed.value.is_object()) {
             resp.status = IpcError::kBadRequest;
-            resp.error = "request must be a JSON object";
+            resp.error = "请求必须是 JSON 对象";
         } else {
             resp = handle_request(parsed.value);
         }
@@ -353,9 +424,18 @@ void IpcServer::handle_connection(int fd) {
         // 空/异常连接：无需响应
     }
     if (!response_text.empty()) {
-        sock_send(fd, response_text.data(), response_text.size());
+        // send() 允许短写，尤其是 Preview 的大 base64 JSON。必须循环到完整发送
+        // 或明确遇到断连；禁止只发半截 JSON 后静默当成功。
+        size_t sent = 0;
+        while (sent < response_text.size()) {
+            const ssize_t n = sock_send(fd, response_text.data() + sent,
+                                        response_text.size() - sent);
+            if (n <= 0) break;
+            sent += static_cast<size_t>(n);
+        }
     }
-    sock_close(fd);
+    // fd 由 accept_loop 的连接线程 lambda 在锁内统一注销并关闭（防止 stop()
+    // 排空阶段 shutdown 到已关闭的 fd 号）——这里不再 close。
 }
 
 IpcResponse IpcServer::handle_request(const JsonValue& request) {
@@ -366,7 +446,7 @@ IpcResponse IpcServer::handle_request(const JsonValue& request) {
     const JsonValue* type_v = request.find("type");
     if (type_v == nullptr || !type_v->is_string()) {
         resp.status = IpcError::kBadRequest;
-        resp.error = "missing string field 'type'";
+        resp.error = "缺少必需字段 'type'（必须是字符串）";
         return resp;
     }
     const std::string type = type_v->as_string();
@@ -384,7 +464,7 @@ IpcResponse IpcServer::handle_request(const JsonValue& request) {
     if (type == "GET_STATUS") {
         if (!status_provider_) {
             resp.status = IpcError::kInternal;
-            resp.error = "status provider not registered";
+            resp.error = "状态提供器未注册";
             return resp;
         }
         resp.status = IpcError::kOk;
@@ -444,7 +524,7 @@ if (type == "GET_CONFIG") {
     if (type == "SET_CONFIG") {
         if (!config_update_) {
             resp.status = IpcError::kInternal;
-            resp.error = "config update handler not registered";
+            resp.error = "配置更新处理器未注册";
             return resp;
         }
         const JsonValue* params = request.find("params");
@@ -474,7 +554,7 @@ if (type == "GET_CONFIG") {
     if (type == "RUNTIME_CONTROL") {
         if (!runtime_control_) {
             resp.status = IpcError::kInternal;
-            resp.error = "runtime control handler not registered";
+            resp.error = "运行时控制处理器未注册";
             return resp;
         }
         const JsonValue* params = request.find("params");
@@ -610,6 +690,59 @@ if (type == "GET_CONFIG") {
         return handle_model_action("remove", model_remove_);
     }
 
+    if (type == "MODEL_SET_CONCURRENCY") {
+        if (!model_concurrency_) {
+            resp.status = IpcError::kInternal;
+            resp.error = "model concurrency handler not registered";
+            return resp;
+        }
+        std::string model_id;
+        if (!param_str("model_id", &model_id)) {
+            resp.status = IpcError::kBadRequest;
+            resp.error = "params.model_id 必填（字符串）";
+            return resp;
+        }
+        if (!valid_model_id(model_id)) {
+            resp.status = IpcError::kBadRequest;
+            resp.error = "model_id 只允许字母/数字/下划线/连字符";
+            return resp;
+        }
+        const JsonValue* params = request.find("params");
+        const JsonValue* count_v = params ? params->find("count") : nullptr;
+        if (!count_v || (!count_v->is_number() && !count_v->is_string())) {
+            resp.status = IpcError::kBadRequest;
+            resp.error = "params.count 必填（1~3 整数）";
+            return resp;
+        }
+        int count = 0;
+        if (count_v->is_number()) {
+            count = static_cast<int>(count_v->as_int(0));
+        } else {
+            try {
+                count = std::stoi(count_v->as_string());
+            } catch (...) {
+                count = 0;
+            }
+        }
+        if (count < 1 || count > 3) {
+            resp.status = IpcError::kBadRequest;
+            resp.error = "params.count 必须在 1~3 之间";
+            return resp;
+        }
+        std::string handler_error;
+        if (!model_concurrency_(model_id, count, &handler_error)) {
+            resp.status = IpcError::kBadRequest;
+            resp.error = handler_error.empty() ? "设置并发失败" : handler_error;
+            return resp;
+        }
+        JsonValue data = JsonValue::object();
+        data.set("model_id", JsonValue::string(model_id));
+        data.set("count", JsonValue::number(static_cast<double>(count)));
+        resp.status = IpcError::kOk;
+        resp.data = std::move(data);
+        return resp;
+    }
+
     resp.status = IpcError::kUnsupported;
     resp.error = "unsupported request type: " + type;
     return resp;
@@ -698,6 +831,8 @@ JsonValue system_status_to_json(const SystemStatus& status) {
     m.set("mouse_dx", JsonValue::number(static_cast<double>(status.metrics.mouse_dx)));
     m.set("mouse_dy", JsonValue::number(static_cast<double>(status.metrics.mouse_dy)));
     m.set("gated_frames", JsonValue::number(static_cast<double>(status.metrics.gated_frames)));
+    m.set("last_frame", JsonValue::number(static_cast<double>(status.metrics.last_frame)));
+    m.set("last_timestamp_us", JsonValue::number(static_cast<double>(status.metrics.last_timestamp_us)));
     m.set("target_frames", JsonValue::number(static_cast<double>(status.metrics.target_frames)));
     m.set("no_target_frames", JsonValue::number(static_cast<double>(status.metrics.no_target_frames)));
     m.set("aim_active", JsonValue::boolean(status.metrics.aim_active));

@@ -21,6 +21,7 @@
 #include <utility>
 #include <chrono>
 
+#include "common/Logger.hpp"
 #include "model/RuntimeProfile.hpp"
 #include "output/LocalHidBackend.hpp"
 #include "output/MakcuMouseBackend.hpp"
@@ -94,24 +95,30 @@ bool OutputBackend::configure(const Params& p, std::string* error) {
     params_ = p;
     backend_.reset();
 
+    std::unique_ptr<IOutputBackend> backend;
     if (p.kind == "usb_proxy") {
-        auto b = std::make_unique<UsbProxyBackend>(p.proxy_socket_path);
-        b->set_enabled(p.enabled);
-        b->set_button_source(p.button_source);
-        b->set_config_source(p.runtime_config);
-        backend_ = std::move(b);
-        return true;
+        backend = std::make_unique<UsbProxyBackend>(p.proxy_socket_path);
+    } else if (p.kind == "local_hid" || p.kind.empty()) {
+        backend = std::make_unique<LocalHidBackend>(p.hidg_path);
+    } else {
+        if (error) *error = "未知输出后端: " + p.kind;
+        return false;
     }
-    if (p.kind == "local_hid" || p.kind.empty()) {
-        auto b = std::make_unique<LocalHidBackend>(p.hidg_path);
-        b->set_enabled(p.enabled);
-        b->set_button_source(p.button_source);
-        b->set_config_source(p.runtime_config);
-        backend_ = std::move(b);
-        return true;
+    backend->set_enabled(p.enabled);
+    backend->set_button_source(p.button_source);
+    backend->set_config_source(p.runtime_config);
+    backend_ = std::move(backend);
+
+    // 预连接：链路建立与注入门控解耦（connect ≠ 注入）。
+    // 注入放行仍由 gate_allows() + 热键决定，这里只把管道先通上，
+    // 让 health/遥测能反映真实链路，并消除首次按热键的建连延迟。
+    if (p.enabled) {
+        std::string connect_error;
+        if (!backend_->connect(&connect_error)) {
+            TTBOX_LOG_WARN("输出后端预连接失败（保持惰性重连）: " + connect_error);
+        }
     }
-    if (error) *error = "未知输出后端: " + p.kind;
-    return false;
+    return true;
 }
 
 // ---------------------------------------------------------------------------

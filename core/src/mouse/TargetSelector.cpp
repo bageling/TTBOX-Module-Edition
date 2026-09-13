@@ -149,7 +149,11 @@ std::vector<TargetSelector::Candidate> TargetSelector::collect_candidates(
                     return out;
                 }
 
-                const float cx = static_cast<float>(cfg.roi_w) * cfg.center_x;
+    // 选择器每一帧（无论是否有检测）都执行轨迹上限裁剪：
+    // 旧实现只在“无检测”分支调用，目标持续存在时轨迹数会越过 max_tracks。
+    trim_tracks(cfg);
+
+    const float cx = static_cast<float>(cfg.roi_w) * cfg.center_x;
                 const float cy = static_cast<float>(cfg.roi_h) * cfg.center_y;
                 const float radius = std::min(cfg.roi_w, cfg.roi_h) * 0.5f * cfg.fov_range;
                 const float radius_sq = radius * radius;
@@ -256,7 +260,11 @@ std::vector<TargetSelector::Candidate> TargetSelector::collect_candidates(
                         if (d < match_r_sq && d < best_d) { best_d = d; best_c = &c; best_t = &t; }
                     }
                 }
-                if (best_c && best_t) {
+    if (best_c && best_t) {
+                    // 切换到另一个轨迹前，先释放旧的激活轨迹，避免多个 track 同时 active。
+                    for (auto& t : tracks_) {
+                        if (t.id != best_t->id) t.active = false;
+                    }
                     best_t->box = best_c->box;
                     best_t->cx = best_c->cx;
                     best_t->cy = best_c->cy;
@@ -277,6 +285,15 @@ std::vector<TargetSelector::Candidate> TargetSelector::collect_candidates(
 
     // ---- 第 3 层：score（无锁定，新建 track 或复用最近 track）----
         {
+            // 与第 2 层一致：切换激活轨迹前先释放旧锁，防止 active 轨迹无限累积。
+            if (active_track_ >= 0) {
+                for (auto& t : tracks_) {
+                    if (t.id == active_track_) {
+                        t.active = false;
+                        break;
+                    }
+                }
+            }
             const Candidate& c = cands.front();  // 已按距离排序，取最近
             // 复用已存在但未激活且距离近的 track（防同目标重复建 track）
             TrackEntry* reuse = nullptr;

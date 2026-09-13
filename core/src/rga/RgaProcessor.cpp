@@ -10,6 +10,7 @@ namespace ttbox::core {
 #include <cerrno>
 #include <chrono>
 #include <cstring>
+#include <unordered_map>
 #include <fcntl.h>
 #include <linux/dma-heap.h>
 #include <sys/ioctl.h>
@@ -88,6 +89,9 @@ struct RgaProcessor::Impl {
     uint32_t out_h = 0;
     uint32_t out_stride_px = 0;   // 物理 wstride（16 对齐）
     rga_buffer_handle_t out_handle = 0;
+    // V4L2 DMA-BUF fd 在一次采集会话内稳定；缓存 import handle，避免每帧
+    // importbuffer_fd/releasebuffer_handle 的用户态和驱动开销。
+    std::unordered_map<int, rga_buffer_handle_t> input_handles;
 
     // 中间 crop buffer（宽高随输入/ROI 变化，懒分配/重建）
     DmaBufFd mid_fd;
@@ -151,10 +155,16 @@ bool RgaProcessor::init(const Params& params, std::string* error) {
 }
 
 void RgaProcessor::destroy() {
-    if (!inited_ && !impl_->out_handle && !impl_->mid_handle) {
+    Impl& i = *impl_;
+    if (!inited_ && !impl_->out_handle && !impl_->mid_handle &&
+        !impl_->out_va && !impl_->mid_va && !impl_->out_fd.valid() &&
+        !impl_->mid_fd.valid()) {
         return;  // 幂等：无资源
     }
-    Impl& i = *impl_;
+    for (const auto& entry : i.input_handles) {
+        if (entry.second != 0) releasebuffer_handle(entry.second);
+    }
+    i.input_handles.clear();
     if (i.mid_handle != 0) {
         releasebuffer_handle(i.mid_handle);
         i.mid_handle = 0;
@@ -215,11 +225,17 @@ bool RgaProcessor::process(const FrameBuffer& input, RgaOutput* output,
     const uint32_t in_wstride_px =
         (stride_bytes >= w * 3) ? (stride_bytes / 3) : w;
 
-    // ---- 1. import 输入 fd（每帧成对 import/release，无泄漏）----
+    // ---- 1. import 输入 fd（按稳定 DMA-BUF fd 缓存 handle）----
     const auto t0 = clock::now();
-    rga_buffer_handle_t in_handle =
-        importbuffer_fd(input.info.dma_fd, static_cast<int>(w), static_cast<int>(h),
-                        RK_FORMAT_BGR_888);
+    rga_buffer_handle_t in_handle = 0;
+    const auto cached = i.input_handles.find(input.info.dma_fd);
+    if (cached != i.input_handles.end()) {
+        in_handle = cached->second;
+    } else {
+        in_handle = importbuffer_fd(input.info.dma_fd, static_cast<int>(w), static_cast<int>(h),
+                                    RK_FORMAT_BGR_888);
+        if (in_handle != 0) i.input_handles.emplace(input.info.dma_fd, in_handle);
+    }
     if (in_handle == 0) {
         if (error) *error = "importbuffer_fd(输入 fd=" +
                             std::to_string(input.info.dma_fd) + ") 失败";
@@ -231,18 +247,16 @@ bool RgaProcessor::process(const FrameBuffer& input, RgaOutput* output,
         static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::microseconds>(
                                   t_import - t0).count());
 
-    // 失败时释放输入 handle 的 guard
-    auto release_input = [&in_handle]() {
-        releasebuffer_handle(in_handle);
-        in_handle = 0;
-    };
+    // 输入 handle 归 RgaProcessor 缓存管理；错误路径也不能释放缓存句柄。
+    auto release_input = []() {};
 
     rga_buffer_t src = wrapbuffer_handle(in_handle, static_cast<int>(w),
                                          static_cast<int>(h), RK_FORMAT_BGR_888,
                                          static_cast<int>(in_wstride_px),
                                          static_cast<int>(h));
 
-    uint32_t crop_us = 0, resize_us = 0;
+    uint32_t crop_us = 0, resize_us = 0, single_us = 0;
+    bool single_used = false;
     const bool roi_enabled = (params_.roi_w > 0 && params_.roi_h > 0);
     // ROI 显式启用时强制走 crop+resize（如预览跟随截取区域；center_crop=false 全画面拉伸仅对无 ROI 场景生效）
     if (params_.center_crop || roi_enabled) {
@@ -260,6 +274,30 @@ bool RgaProcessor::process(const FrameBuffer& input, RgaOutput* output,
             rect = {static_cast<int>((w - cw) / 2), static_cast<int>((h - ch) / 2),
                     static_cast<int>(cw), static_cast<int>(ch)};
         }
+        // ---- 2.5 单段 improcess：crop+resize 一次完成（失败自动回退两段）----
+        if (params_.single_pass) {
+            rga_buffer_t dst = wrapbuffer_handle(i.out_handle, static_cast<int>(i.out_w),
+                                                 static_cast<int>(i.out_h), out_fmt,
+                                                 static_cast<int>(i.out_stride_px),
+                                                 static_cast<int>(i.out_h));
+            im_rect dst_rect = {0, 0, static_cast<int>(i.out_w), static_cast<int>(i.out_h)};
+            const auto t1 = clock::now();
+            const IM_STATUS st = improcess(src, dst, rga_buffer_t{}, rect, dst_rect,
+                                           im_rect{}, IM_SYNC);
+            const auto t_single = clock::now();
+            single_us = static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+                                                  t_single - t1).count());
+            if (st == IM_STATUS_SUCCESS) {
+                single_used = true;
+            } else {
+                metrics_.fallback_count.fetch_add(1);
+                if (metrics_.fallback_count.load() <= 3) {
+                    TTBOX_LOG_WARN("improcess 单段 crop+resize 失败(" +
+                                   std::string(im_status_str(st)) + ")，回退 imcrop+imresize");
+                }
+            }
+        }
+        if (!single_used) {
         const uint32_t cw_align = align16(cw);
         if (i.mid_w != cw || i.mid_h != ch) {
             // 中间 buffer 懒分配/重建（仅输入/ROI 变化时）
@@ -324,6 +362,7 @@ bool RgaProcessor::process(const FrameBuffer& input, RgaOutput* output,
             metrics_.error_frames.fetch_add(1);
             return false;
         }
+        }
     } else {
         // ---- 直接拉伸（保持当前 resize 语义，不做 crop）----
         rga_buffer_t dst = wrapbuffer_handle(i.out_handle, static_cast<int>(i.out_w),
@@ -342,7 +381,7 @@ bool RgaProcessor::process(const FrameBuffer& input, RgaOutput* output,
             return false;
         }
     }
-    release_input();  // 输入 handle 成对释放
+    release_input();  // 输入 handle 由 destroy() 统一释放
 
     const auto t_end = clock::now();
     const uint32_t total_us =
@@ -352,13 +391,20 @@ bool RgaProcessor::process(const FrameBuffer& input, RgaOutput* output,
     // ---- 统计 ----
     metrics_.ok_frames.fetch_add(1);
     metrics_.import_sum_us.fetch_add(import_us);
-    metrics_.crop_sum_us.fetch_add(crop_us);
-    metrics_.resize_sum_us.fetch_add(resize_us);
     metrics_.total_sum_us.fetch_add(total_us);
     metrics_.last_import_us.store(import_us);
-    metrics_.last_crop_us.store(crop_us);
-    metrics_.last_resize_us.store(resize_us);
     metrics_.last_total_us.store(total_us);
+    if (single_used) {
+        metrics_.single_ok.fetch_add(1);
+        metrics_.single_sum_us.fetch_add(single_us);
+        metrics_.resize_sum_us.fetch_add(single_us);  // resize_ms 口径 = 预处理 RGA 阶段
+        metrics_.last_resize_us.store(single_us);
+    } else {
+        metrics_.crop_sum_us.fetch_add(crop_us);
+        metrics_.resize_sum_us.fetch_add(resize_us);
+        metrics_.last_crop_us.store(crop_us);
+        metrics_.last_resize_us.store(resize_us);
+    }
 
     // ---- 输出 ----
     output->ok = true;

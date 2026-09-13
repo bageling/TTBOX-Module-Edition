@@ -3,6 +3,7 @@
 
 #include <atomic>
 #include <memory>
+#include <mutex>
 #include <string>
 
 #include "auth/AiboxLicenseClient.hpp"
@@ -68,6 +69,7 @@ private:
     bool handle_model_validate(const std::string& model_id, std::string* error);
     bool handle_model_install(const std::string& model_id, std::string* error);
     bool handle_model_activate(const std::string& model_id, std::string* error);
+    bool handle_model_set_concurrency(const std::string& model_id, int count, std::string* error);
 
     // 模型热切换：stop → 用新 active 模型重建 Worker 参数 → start。
     // 返回 true = 新模型已加载且完成首次真实推理（running_model_id 已提交）。
@@ -75,9 +77,13 @@ private:
     bool switch_active_model_runtime(const std::string& new_model_id, std::string* error);
     bool handle_model_remove(const std::string& model_id, std::string* error);
 
-    // 激活成功后同步 RuntimeProfile.model_id 与 active.json 一致（内存 + 落盘），
-    // 消除「配置显示 B 实际跑 A」的第二套记录脱节问题。
-    void sync_model_id_to_profile(const std::string& model_id);
+    // 激活成功后同步 RuntimeProfile.model_id 与 active.json 一致（先落盘、后发布内存）。
+    // 返回 false 时调用方必须将模型切换事务回滚，禁止留下配置与实际运行模型脱节。
+    bool sync_model_id_to_profile(const std::string& model_id, std::string* error = nullptr);
+
+    // RuntimeProfile 唯一持久化入口：将 canonical profile 合入宿主配置，
+    // 通过同目录临时文件 + 原子 rename 发布，避免断电/崩溃留下半截 JSON。
+    bool persist_runtime_profile(const RuntimeProfile& profile, std::string* error = nullptr);
 
     // 从配置构造 CoreRuntime 参数
     bool build_runtime_params(CoreRuntime::Params& out_params, std::string* error);
@@ -86,6 +92,10 @@ private:
     std::string resolve_license_card(const std::string& cli_license) const;
 
     ConfigManager config_;
+    mutable std::mutex config_persist_mutex_;
+    // CoreRuntime 生命周期事务锁：保护 MODEL_ACTIVATE、RUNTIME_CONTROL、主循环自动重试
+    // 与状态采集，禁止多个 IPC 线程同时 stop/init/start/collect。
+    mutable std::mutex runtime_lifecycle_mutex_;
     IpcServer ipc_;
     std::string ipc_path_ = "/tmp/ttbox_core.sock";
     std::string config_path_;
@@ -106,6 +116,7 @@ private:
     std::unique_ptr<ModelManagement> model_management_;
     std::string running_model_id_;
     std::string model_failure_code_;
+    std::string model_failure_message_;
 
     // ---- 授权（等价原 aibox-bl cardVerifyThreadFunc）----
     std::unique_ptr<auth::AiboxLicenseClient> license_client_;

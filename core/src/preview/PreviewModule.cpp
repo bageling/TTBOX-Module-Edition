@@ -17,6 +17,7 @@ namespace ttbox::core {
 #include <opencv2/imgproc.hpp>
 
 #include "common/Logger.hpp"
+#include "common/CpuAffinity.hpp"
 
 namespace ttbox::core {
 
@@ -65,16 +66,35 @@ bool encode_bgr_jpeg(const uint8_t* bgr, uint32_t width, uint32_t height,
     jpeg_set_quality(&compressor, std::clamp(quality, 1, 100), TRUE);
     jpeg_start_compress(&compressor, TRUE);
 
-    std::vector<uint8_t> rgb_row(static_cast<size_t>(width) * 3);
+    // 预览编码只由单个线程调用，thread_local 让行缓冲跨帧复用，
+    // 同时不扩大 PreviewModule 的锁范围。批量 scanline 一次写多行，
+    // 减少 jpeg_write_scanlines 的调用次数（libjpeg-turbo 推荐 16 行/批）。
+    thread_local std::vector<uint8_t> rgb_rows;
+    const size_t row_bytes = static_cast<size_t>(width) * 3;
+    constexpr size_t kRowsPerBatch = 16;
+    if (rgb_rows.size() < kRowsPerBatch * row_bytes) {
+        rgb_rows.resize(kRowsPerBatch * row_bytes);
+    }
+    JSAMPROW row_ptrs[kRowsPerBatch];
     while (compressor.next_scanline < compressor.image_height) {
-        const auto* source = bgr + static_cast<size_t>(compressor.next_scanline) * stride;
-        for (uint32_t x = 0; x < width; ++x) {
-            rgb_row[x * 3] = source[x * 3 + 2];
-            rgb_row[x * 3 + 1] = source[x * 3 + 1];
-            rgb_row[x * 3 + 2] = source[x * 3];
+        const size_t rows_here =
+            std::min<size_t>(kRowsPerBatch,
+                             compressor.image_height - compressor.next_scanline);
+        for (size_t r = 0; r < rows_here; ++r) {
+            const auto* source =
+                bgr + static_cast<size_t>(compressor.next_scanline + r) * stride;
+            uint8_t* rgb_row = rgb_rows.data() + r * row_bytes;
+            for (uint32_t x = 0; x < width; ++x) {
+                rgb_row[x * 3] = source[x * 3 + 2];
+                rgb_row[x * 3 + 1] = source[x * 3 + 1];
+                rgb_row[x * 3 + 2] = source[x * 3];
+            }
         }
-        JSAMPROW row = rgb_row.data();
-        jpeg_write_scanlines(&compressor, &row, 1);
+        for (size_t r = 0; r < rows_here; ++r) {
+            row_ptrs[r] = rgb_rows.data() + r * row_bytes;
+        }
+        jpeg_write_scanlines(&compressor, row_ptrs,
+                             static_cast<JDIMENSION>(rows_here));
     }
     jpeg_finish_compress(&compressor);
     jpeg_destroy_compress(&compressor);
@@ -96,8 +116,14 @@ void PreviewModule::resolve_crop_size(uint32_t* crop_width, uint32_t* crop_heigh
     uint32_t height = params_.crop_height;
     if (params_.runtime_config != nullptr) {
         if (auto profile = params_.runtime_config->snapshot()) {
-            if (profile->capture.width > 0) width = profile->capture.width;
-            if (profile->capture.height > 0) height = profile->capture.height;
+            // Preview 与模型截取尺寸（capture.width/height）彻底解耦：
+            // capture 是 AI 的 ROI（随模型输入档位 192/256/320/416/640 变化），
+            // preview 是给人看的固定窗口（默认 640×640，中心裁剪）。
+            // 此前这里误读 capture.width/height，导致「模型输入从 320 改 416，
+            // 预览跟着变」——违反 Preview/AI 解耦架构。
+            // preview.width/height 为 0 时保持 Params 默认（Application 传入的 crop_width/height）。
+            if (profile->preview.width > 0) width = profile->preview.width;
+            if (profile->preview.height > 0) height = profile->preview.height;
         }
     }
     *crop_width = std::max<uint32_t>(1, width);
@@ -256,6 +282,13 @@ bool PreviewModule::snapshot(std::vector<uint8_t>* jpeg_out) const {
 }
 
 void PreviewModule::loop() {
+    // JPEG 编码/裁剪是每帧必经的 CPU 工作，固定大核避免跨核抖动。
+    {
+        std::string aerr;
+        if (!CpuAffinity::set_thread_affinity(CpuAffinity::kBigCoreMask, &aerr)) {
+            TTBOX_LOG_WARN("Preview 线程绑定大核失败: " + aerr);
+        }
+    }
     const auto start_time = clock::now();
     const auto interval = std::chrono::milliseconds(1000 / params_.fps);
     auto next_tick = start_time;
@@ -313,12 +346,14 @@ bool PreviewModule::encode_frame(const FrameBuffer& frame,
     const uint32_t origin_x = (frame_width - crop_width) / 2;
     const uint32_t origin_y = (frame_height - crop_height) / 2;
     const uint32_t crop_stride = crop_width * 3;
-    std::vector<uint8_t> crop(static_cast<size_t>(crop_stride) * crop_height);
+    const size_t crop_bytes = static_cast<size_t>(crop_stride) * crop_height;
+    if (crop_buffer_.size() < crop_bytes) crop_buffer_.resize(crop_bytes);
+    uint8_t* crop = crop_buffer_.data();
     const auto* source = static_cast<const uint8_t*>(frame.info.cpu_va);
     for (uint32_t y = 0; y < crop_height; ++y) {
         const auto* source_row = source + static_cast<size_t>(origin_y + y) * frame_stride +
                                  static_cast<size_t>(origin_x) * 3;
-        std::memcpy(crop.data() + static_cast<size_t>(y) * crop_stride,
+        std::memcpy(crop + static_cast<size_t>(y) * crop_stride,
                     source_row, crop_stride);
     }
 
@@ -330,13 +365,13 @@ bool PreviewModule::encode_frame(const FrameBuffer& frame,
             if (detections_provider_) raw = detections_provider_();
         }
         smooth_boxes(raw, &boxes);
-        draw_boxes(crop.data(), crop_width, crop_height, crop_stride,
+        draw_boxes(crop, crop_width, crop_height, crop_stride,
                    boxes, origin_x, origin_y);
     }
 
     metrics_.width.store(crop_width);
     metrics_.height.store(crop_height);
-    return encode_bgr_jpeg(crop.data(), crop_width, crop_height, crop_stride,
+    return encode_bgr_jpeg(crop, crop_width, crop_height, crop_stride,
                            params_.jpeg_quality, jpeg_out, error);
 }
 

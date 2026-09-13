@@ -105,7 +105,7 @@ public:
     struct Params {
         std::string kind = "local_hid";   // local_hid
         std::string hidg_path = "/dev/hidg1";
-        std::string proxy_socket_path = "/run/orangepi-mouse-passthrough/cmd.sock";
+        std::string proxy_socket_path = "/run/ttbox-mouse-passthrough/cmd.sock";
         // Gate / 运行时
         RuntimeConfig* runtime_config = nullptr;
         std::atomic<uint16_t>* button_source = nullptr;

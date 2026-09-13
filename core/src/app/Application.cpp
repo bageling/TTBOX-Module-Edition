@@ -7,8 +7,19 @@
 #include <cstring>
 #include <fstream>
 #include <filesystem>
+#include <limits>
 #include <sstream>
 #include <thread>
+
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+#include <fcntl.h>
+#include <unistd.h>
+#endif
 
 #include "common/Logger.hpp"
 #include "common/CpuAffinity.hpp"
@@ -59,9 +70,34 @@ int parse_color_order(const std::string& s) {
 }
 
 std::vector<int> parse_worker_cores(const std::string& s) {
-    // RK3588 生产配置固定三核；保留参数仅用于兼容旧配置读取。
-    (void)s;
-    return {1, 2, 4};
+    if (s.empty()) return {1, 2, 4};
+
+    std::vector<int> result;
+    std::istringstream iss(s);
+    std::string token;
+    while (std::getline(iss, token, ',')) {
+        // 去掉首尾空格和换行
+        size_t start = token.find_first_not_of(" \t\r\n");
+        size_t end = token.find_last_not_of(" \t\r\n");
+        if (start == std::string::npos) continue;
+        token = token.substr(start, end - start + 1);
+
+        try {
+            int core = std::stoi(token);
+            // RKNN core_mask 是位掩码，不是 CPU 编号。RK3588 三个 NPU
+            // 核心的独占掩码只有 1、2、4；3/5/6 会造成核心重叠调度。
+            if (core == 1 || core == 2 || core == 4) {
+                if (std::find(result.begin(), result.end(), core) == result.end()) {
+                    result.push_back(core);
+                }
+            }
+        } catch (...) {
+            // 跳过非法值，不报错
+        }
+    }
+    // 配置中出现非法/重叠 mask 时回退到稳定的独占组合，避免把错误
+    // 参数直接传给 RKNN 后出现吞吐下降或不同版本驱动行为不一致。
+    return result.empty() ? std::vector<int>{1, 2, 4} : result;
 }
 
 std::string strip(const std::string& s) {
@@ -102,11 +138,18 @@ std::string Application::resolve_license_card(const std::string& cli_license) co
 
 bool Application::build_runtime_params(CoreRuntime::Params& out_params,
                                        std::string* error) {
-    (void)error;
-    out_params.capture.device =
-        config_.get_string("capture_device", "/dev/video0");
+    out_params.capture.device = config_.get_string("capture_device", "/dev/video0");
+    // HDMI-RX 输入必须走 V4L2 video 节点。DRM card/render 节点仅用于
+    // loopout/NPU，误填会导致采集线程打开错误设备并让整条链路失效。
+    if (out_params.capture.device != "/dev/video0") {
+        if (error) {
+            *error = "INVALID_CAPTURE_DEVICE: RK3588 HDMI-RX 输入必须使用 /dev/video0";
+        }
+        out_params.capture.device = "/dev/video0";
+        return false;
+    }
     out_params.capture.num_buffers =
-        static_cast<uint32_t>(config_.get_int("capture_buffers", 4));
+        static_cast<uint32_t>(config_.get_int("capture_buffers", 8));
     out_params.capture.poll_timeout_ms =
         config_.get_int("capture_poll_timeout_ms", 1000);
 
@@ -146,13 +189,29 @@ bool Application::build_runtime_params(CoreRuntime::Params& out_params,
         if (selected_record->manifest.input_height > 0) {
             out_params.workers.out_h = selected_record->manifest.input_height;
         }
+        // 每个模型的并发独立配置（manifest.worker_cores），未配置时回退到全局 config。
+        const std::string& manifest_cores = selected_record->manifest.worker_cores;
+        if (!manifest_cores.empty()) {
+            out_params.workers.worker_cores = parse_worker_cores(manifest_cores);
+        } else {
+            out_params.workers.worker_cores =
+                parse_worker_cores(config_.get_string("worker_cores", ""));
+        }
+    } else {
+        out_params.workers.worker_cores =
+            parse_worker_cores(config_.get_string("worker_cores", ""));
     }
     if (out_params.workers.model_path.empty()) {
         if (error) *error = "MODEL_NOT_FOUND: model_path 为空";
         return false;
     }
-    out_params.workers.worker_cores =
-        parse_worker_cores(config_.get_string("worker_cores", ""));
+    // 跳过 CPU↔NPU 缓存同步：零拷贝 I/O 下可降低推理延迟（实测对比后决定是否开启）。
+    out_params.workers.disable_cache_flush =
+        config_.get_bool("rknn_disable_cache_flush", false);
+    // 实验开关：RGA 输出 DMA-BUF 直绑 RKNN 输入，省掉每帧 CPU memcpy。
+    // 默认关闭；开启后 WorkerPool 会在 fd 变化时重新绑定，失败自动回退 CPU 拷贝。
+    out_params.workers.external_dma_input =
+        config_.get_bool("rknn_external_dma_input", false);
     if (out_params.workers.out_w == 0) {
         out_params.workers.out_w =
             static_cast<uint32_t>(config_.get_int("model_input_width", 640));
@@ -201,7 +260,7 @@ bool Application::build_runtime_params(CoreRuntime::Params& out_params,
         output::OutputBackend::Params bp;
         bp.kind = output_kind;
         bp.hidg_path = config_.get_string("output_hidg_path", "/dev/hidg0");
-        bp.proxy_socket_path = config_.get_string("output_proxy_socket", "/run/orangepi-mouse-passthrough/cmd.sock");
+        bp.proxy_socket_path = config_.get_string("output_proxy_socket", "/run/ttbox-mouse-passthrough/cmd.sock");
         bp.enabled = enabled;
         bp.runtime_config = &runtime_config_;
         // button_source 由 Application::start 阶段绑定（见 add_hid_button_source 处）
@@ -225,10 +284,16 @@ bool Application::build_runtime_params(CoreRuntime::Params& out_params,
     }
     out_params.output = hid_output_;
     out_params.runtime_config = &runtime_config_;
+    out_params.mouse_event_socket =
+        config_.get_string("input_event_socket", "/run/ttbox-mouse-passthrough/event.sock");
     return true;
 }
 
 int Application::initialize(int argc, char** argv) {
+    if (initialized_) {
+        TTBOX_LOG_WARN("Application 已初始化，忽略重复调用");
+        return 0;
+    }
     std::string cli_license;
     std::string cli_secret;
     bool verify_only = false;
@@ -305,9 +370,9 @@ int Application::initialize(int argc, char** argv) {
     }
     TTBOX_LOG_INFO("配置已加载: " + config_path_);
 
-    // ---- CPU 调频策略（实测：CPU 占用仅 15%，NPU 才是主力且频率独立）----
-    // governor=schedutil（动态调频：忙时自动满频，闲时降频降温）+ min 下限 50% 防深睡。
-    // 实测与 performance+锁死 性能完全一致（e2e/fps 无差异），温度更低。
+    // ---- CPU 调频策略：使用系统默认动态调频，不强制拉满频率 ----
+    // 绑核已经保证采集/推理/瞄准/预览在大核上运行；频率交给内核
+    // schedutil 按负载自适应，避免长期满频导致温度过高。
     {
         for (const char* pol : {"policy0", "policy4", "policy6"}) {
             std::ofstream g(std::string("/sys/devices/system/cpu/cpufreq/") + pol + "/scaling_governor");
@@ -373,7 +438,20 @@ int Application::initialize(int argc, char** argv) {
             TTBOX_LOG_ERROR("RuntimeProfile 校验失败: " + profile_error);
             return 1;
         }
-        runtime_config_.update(profile);
+        // from_json() 可能修复历史坏值（例如 capture=1×1 → 0×0）。
+        // 若 canonical 与磁盘原值不同，通过唯一提交入口一次完成磁盘和内存更新；
+        // 未发生自愈时只发布已校验的内存快照。
+        if (profile.to_json().dump() != profile_json->dump()) {
+            std::string repair_error;
+            if (persist_runtime_profile(profile, &repair_error)) {
+                TTBOX_LOG_WARN("RuntimeProfile 历史坏配置已自愈并写回磁盘");
+            } else {
+                TTBOX_LOG_WARN("RuntimeProfile 自愈写回失败，使用内存合法值启动: " + repair_error);
+                runtime_config_.update(profile);
+            }
+        } else {
+            runtime_config_.update(profile);
+        }
         TTBOX_LOG_INFO("RuntimeProfile 已加载");
     }
 
@@ -542,6 +620,7 @@ int Application::initialize(int argc, char** argv) {
     // ---- 5. 启动 IPC 服务 ----
     ipc_.set_status_provider([this] { return status_provider(); });
     ipc_.set_preview_provider([this](std::vector<uint8_t>* out, uint64_t* seq) {
+        std::lock_guard<std::mutex> lifecycle_lock(runtime_lifecycle_mutex_);
         const bool ok = core_runtime_ && core_runtime_->preview() && core_runtime_->preview()->running()
                    ? core_runtime_->preview()->snapshot(out)
                    : false;
@@ -583,6 +662,10 @@ int Application::initialize(int argc, char** argv) {
         ipc_.set_model_remove_handler(
             [this](const std::string& id, std::string* error) {
                 return handle_model_remove(id, error);
+            });
+        ipc_.set_model_concurrency_handler(
+            [this](const std::string& id, int count, std::string* error) {
+                return handle_model_set_concurrency(id, count, error);
             });
     }
     std::string ipc_error;
@@ -630,18 +713,26 @@ void Application::run() {
     //   2) 运行中崩溃/退出：主循环每 tick 检测到 runtime 停但 want=true 时自动重启。
     // 用户 /api/control/stop 会把 want 置 false，此后不再自动拉起。
     std::string rt_error;
-    if (want_runtime_running_.load()) {
-        if (core_runtime_ && core_runtime_->start(&rt_error)) {
-            runtime_started_ = true;
-            model_failure_code_.clear();
-            TTBOX_LOG_INFO("CoreRuntime 已启动，等待首帧真实 RKNN 推理与 Decode");
+    {
+        // IPC 已在 initialize() 末尾启动；首次自动 start 也必须加入同一生命周期事务，
+        // 否则进程刚启动时收到 restart/MODEL_ACTIVATE 会并发操作同一个 CoreRuntime。
+        std::lock_guard<std::mutex> lifecycle_lock(runtime_lifecycle_mutex_);
+        if (want_runtime_running_.load()) {
+            running_model_id_.clear();
+            if (core_runtime_ && core_runtime_->start(&rt_error)) {
+                runtime_started_ = true;
+                model_failure_code_.clear();
+                model_failure_message_.clear();
+                TTBOX_LOG_INFO("CoreRuntime 已启动，等待首帧真实 RKNN 推理与 Decode");
+            } else {
+                model_failure_code_ = "RKNN_INIT_FAILED";
+                model_failure_message_ = rt_error;
+                TTBOX_LOG_WARN("CoreRuntime 首次启动失败，进入后台自动重试: " + model_failure_message_);
+                runtime_started_ = false;
+            }
         } else {
-            model_failure_code_ = rt_error.empty() ? "RKNN_INIT_FAILED" : rt_error;
-            TTBOX_LOG_WARN("CoreRuntime 首次启动失败，进入后台自动重试: " + model_failure_code_);
             runtime_started_ = false;
         }
-    } else {
-        runtime_started_ = false;
     }
 
     constexpr auto kTickMs = std::chrono::milliseconds(50);
@@ -650,38 +741,143 @@ void Application::run() {
     // 启动失败重试间隔（与 heartbeat 解耦：重试更激进，HDMI 恢复后 ~2s 内拉起）
     constexpr auto kRetryInterval = std::chrono::seconds(2);
     auto last_retry = std::chrono::steady_clock::now();
+
+    // ---- 采集活体看门狗 ----
+    // capture 线程被驱动卡死时 CoreRuntime::running() 仍是 true，主循环的“自动重试”
+    // 不会触发，表现为采集/推理同时零帧、Web 显示冻结前 FPS。这里监视 V4L2 帧计数器：
+    // 运行满足宽限期后连续 3s 无新帧 → 强制 stop/start 重枚举 /dev/video0 恢复链路。
+    // 同时监视推理 worker 聚合帧数：采集还在走但 worker 卡死（NPU/RGA 挂住）时，
+    // 检测帧 5s 不增长也会触发同一套 stop/start，避免“画面在动但检测静默归零”。
+    uint64_t watch_capture_frames = 0;
+    uint64_t watch_processed = std::numeric_limits<uint64_t>::max();
+    auto watch_capture_seen_at = std::chrono::steady_clock::now();
+    auto watch_processed_seen_at = std::chrono::steady_clock::now();
+    auto watch_capture_restart_at = std::chrono::steady_clock::now();
+    bool watch_capture_running_seen = false;
+    auto watch_capture_running_since = std::chrono::steady_clock::now();
+    constexpr auto kCaptureStallTime = std::chrono::seconds(3);
+    constexpr auto kInferStallTime = std::chrono::seconds(5);
+    constexpr auto kCaptureWatchGrace = std::chrono::seconds(10);
+    constexpr auto kCaptureRestartMinGap = std::chrono::seconds(15);
+
     while (!shutdown_flag().load()) {
         std::this_thread::sleep_for(kTickMs);
         // 授权失效时仍保持进程存活（通过 supervisor recover() 重启恢复），不主动自杀
         const auto now = std::chrono::steady_clock::now();
-        // 自动启停核心：want=true 但 runtime 没在跑 → 每 2s 重试一次（首次失败自恢复/崩溃自拉起）
-        if (want_runtime_running_.load() && core_runtime_ && !core_runtime_->running()) {
-            if (now - last_retry >= kRetryInterval) {
-                last_retry = now;
-                std::string retry_error;
-                if (core_runtime_->start(&retry_error)) {
-                    runtime_started_ = true;
-                    model_failure_code_.clear();
-                    TTBOX_LOG_INFO("CoreRuntime 自动重试成功，等待真实模型首帧");
-                } else if (!retry_error.empty()) {
-                    model_failure_code_ = retry_error;
-                    TTBOX_LOG_DEBUG("CoreRuntime 自动重试中: " + retry_error);
+        // 自动重试、首帧提交、错误读取与 IPC 生命周期操作共享同一把锁，
+        // 防止 MODEL_ACTIVATE / restart 正在重建对象时主循环并发 start/model_ready。
+        {
+            std::lock_guard<std::mutex> lifecycle_lock(runtime_lifecycle_mutex_);
+            if (want_runtime_running_.load() && core_runtime_ && !core_runtime_->running()) {
+                if (now - last_retry >= kRetryInterval) {
+                    last_retry = now;
+                    std::string retry_error;
+                    if (core_runtime_->start(&retry_error)) {
+                        runtime_started_ = true;
+                        model_failure_code_.clear();
+                        model_failure_message_.clear();
+                        TTBOX_LOG_INFO("CoreRuntime 自动重试成功，等待真实模型首帧");
+                    } else if (!retry_error.empty()) {
+                        model_failure_code_ = "RKNN_INIT_FAILED";
+                        model_failure_message_ = retry_error;
+                        TTBOX_LOG_DEBUG("CoreRuntime 自动重试中: " + retry_error);
+                    }
                 }
             }
-        }
-        if (core_runtime_ && core_runtime_->model_ready()) {
-            const std::string selected = model_management_ ? model_management_->registry().active_model() : "";
-            if (!selected.empty() && running_model_id_ != selected) {
-                running_model_id_ = selected;
-                model_failure_code_.clear();
-                // 模型实际就绪（含启动恢复/自动重试）时，同步 runtime_profile.model_id，
-                // 消除「配置显示 B 实际跑 A」——active.json 与 runtime_profile 永远一致。
-                sync_model_id_to_profile(selected);
-                TTBOX_LOG_INFO("真实模型已就绪: running_model_id=" + running_model_id_ +
-                               " inference+decode=PASS");
+            // 采集卡死检测：只有 runtime 稳定运行超宽限期后才允许触发，
+            // 重启后 watch 状态重置，避免启动阶段 V4L2 打开慢造成误杀。
+            if (core_runtime_ && core_runtime_->running() && core_runtime_->capture()) {
+                if (!watch_capture_running_seen) {
+                    watch_capture_running_seen = true;
+                    watch_capture_running_since = now;
+                }
+                const uint64_t frames =
+                    core_runtime_->capture()->metrics().capture_frames.load();
+                if (watch_capture_frames == 0) {
+                    watch_capture_frames = frames;
+                    watch_capture_seen_at = now;
+                } else if (frames != watch_capture_frames) {
+                    watch_capture_frames = frames;
+                    watch_capture_seen_at = now;
+                }
+                const uint64_t processed = core_runtime_->workers_processed();
+                if (watch_processed == std::numeric_limits<uint64_t>::max() ||
+                    processed != watch_processed) {
+                    // 首观测或 worker 池被重建（模型热切换/看门狗重启）后重新基线，
+                    // 避免把计数归零误判成卡死。
+                    watch_processed = processed;
+                    watch_processed_seen_at = now;
+                }
+                const bool grace_ok = watch_capture_running_seen &&
+                    (now - watch_capture_running_since) >= kCaptureWatchGrace;
+                const bool gap_ok =
+                    (now - watch_capture_restart_at) >= kCaptureRestartMinGap;
+                const bool capture_stalled =
+                    (now - watch_capture_seen_at) >= kCaptureStallTime;
+                // 推理卡死只在“采集仍然健康”时判断：若采集也停了，归采集看门狗处理。
+                const bool capture_alive =
+                    (now - watch_capture_seen_at) < kCaptureStallTime;
+                const bool infer_stalled = capture_alive &&
+                    (now - watch_processed_seen_at) >= kInferStallTime;
+                if (grace_ok && gap_ok && (capture_stalled || infer_stalled)) {
+                    const int64_t stall_ms =
+                        std::chrono::duration_cast<std::chrono::milliseconds>(
+                            (infer_stalled ? now - watch_processed_seen_at
+                                           : now - watch_capture_seen_at)).count();
+                    TTBOX_LOG_WARN(std::string(infer_stalled ? "推理卡死看门狗触发" : "采集卡死看门狗触发") +
+                                   ": " + std::to_string(stall_ms) + "ms 无进展（frames=" +
+                                   std::to_string(frames) + " processed=" +
+                                   std::to_string(processed) + "），执行 stop/start 重枚举");
+                    running_model_id_.clear();
+                    want_runtime_running_.store(true);
+                    core_runtime_->stop();
+                    std::string restart_error;
+                    if (core_runtime_->start(&restart_error)) {
+                        runtime_started_ = true;
+                        model_failure_code_.clear();
+                        model_failure_message_.clear();
+                        TTBOX_LOG_INFO("采集卡死看门狗重枚举成功");
+                    } else {
+                        runtime_started_ = false;
+                        model_failure_code_ = "CAPTURE_WATCHDOG_RESTART_FAILED";
+                        model_failure_message_ = restart_error;
+                        TTBOX_LOG_WARN("采集卡死看门狗重枚举失败: " + restart_error);
+                    }
+                    watch_capture_restart_at = now;
+                    watch_capture_frames = 0;
+                    watch_capture_seen_at = now;
+                    watch_processed = std::numeric_limits<uint64_t>::max();
+                    watch_processed_seen_at = now;
+                    watch_capture_running_seen = false;
+                }
+            } else {
+                watch_capture_running_seen = false;
             }
-        } else if (core_runtime_ && core_runtime_->running() && core_runtime_->model_errors() > 0) {
-            if (model_failure_code_.empty()) model_failure_code_ = "INFERENCE_FAILED_OR_OUTPUT_INVALID";
+            if (core_runtime_ && core_runtime_->model_ready()) {
+                const std::string selected = model_management_ ? model_management_->registry().active_model() : "";
+                if (!selected.empty() && running_model_id_ != selected) {
+                    // 模型实际就绪时先提交 runtime_profile.model_id；只有配置同步成功，
+                    // 才把“当前模型”和首帧 PASS 对外发布，避免底层失败却报告成功。
+                    std::string sync_error;
+                    if (sync_model_id_to_profile(selected, &sync_error)) {
+                        running_model_id_ = selected;
+                        model_failure_code_.clear();
+                        model_failure_message_.clear();
+                        TTBOX_LOG_INFO("真实模型已就绪: running_model_id=" + running_model_id_ +
+                                       " inference+decode=PASS");
+                    } else {
+                        running_model_id_.clear();
+                        model_failure_code_ = "MODEL_PROFILE_PERSIST_FAILED";
+                        model_failure_message_ = sync_error;
+                        TTBOX_LOG_ERROR("真实模型首帧已完成，但当前模型状态提交失败: " + sync_error);
+                    }
+                }
+            } else if (core_runtime_ && core_runtime_->running() && core_runtime_->model_errors() > 0) {
+                if (model_failure_code_.empty()) {
+                    model_failure_code_ = "INFERENCE_FAILED_OR_OUTPUT_INVALID";
+                    model_failure_message_.clear();
+                }
+            }
         }
         if (now - last_heartbeat >= kHeartbeatSec) {
             last_heartbeat = now;
@@ -700,22 +896,28 @@ void Application::shutdown() {
     const bool was_running = running_.exchange(false);
     if (was_running) TTBOX_LOG_INFO("Application shutdown() 开始");
 
-    if (runtime_started_ && core_runtime_) {
-        TTBOX_LOG_INFO("停止 CoreRuntime...");
-        core_runtime_->stop();
-        runtime_started_ = false;
-    }
-    core_runtime_.reset();
-    hid_output_.reset();
+    // 先停止并排空 IPC：所有 provider/handler 都捕获 this，并可能读取 CoreRuntime、
+    // ModelRegistry、授权对象。必须等连接线程退出后，才能销毁这些依赖。
+    ipc_.stop();
 
-    // 授权线程停在 IPC 之后（让 IPC 最后一个响应仍能拿到授权快照）
+    {
+        std::lock_guard<std::mutex> lifecycle_lock(runtime_lifecycle_mutex_);
+        if (core_runtime_) {
+            TTBOX_LOG_INFO("停止 CoreRuntime...");
+            core_runtime_->stop();
+            runtime_started_ = false;
+        }
+        running_model_id_.clear();
+        core_runtime_.reset();
+        hid_output_.reset();
+    }
+
     if (license_daemon_) {
         license_daemon_->stop();
         license_daemon_.reset();
     }
     license_client_.reset();
 
-    ipc_.stop();
     initialized_ = false;
     TTBOX_LOG_INFO("=== " + std::string(kAppName) + " 已退出 ===");
 }
@@ -738,6 +940,7 @@ bool Application::license_is_pro() const {
 }
 
 SystemStatus Application::status_provider() const {
+    std::lock_guard<std::mutex> lifecycle_lock(runtime_lifecycle_mutex_);
     SystemStatus st;
     st.running = running_.load();
     st.app_name = kAppName;
@@ -745,10 +948,10 @@ SystemStatus Application::status_provider() const {
     if (start_time_ms_ > 0.0) st.uptime_ms = now_ms() - start_time_ms_;
     st.ipc_socket = ipc_.socket_path();
     st.config_file = config_.path();
-    // 当前模型：优先实际运行中的模型，其次激活模型（active.json 真相源）
-    if (model_management_) {
-        st.current_model_id = model_management_->registry().active_model();
-    }
+    // 当前模型只报告“已真实运行并通过首帧推理”的 running_model_id_。
+    // active.json 只是待运行/已选中模型，由 MODEL_LIST.selected_model_id 单独表达；
+    // 加载失败时禁止把 selected 当 current，避免 API 显示 B、底层实际没跑 B。
+    st.current_model_id = running_model_id_;
     st.runtime_running = core_runtime_ ? core_runtime_->running() : false;
     // G1：真实流水线指标（runtime 未运行时保持全 0 = unavailable）
     if (core_runtime_) {
@@ -758,6 +961,7 @@ SystemStatus Application::status_provider() const {
 }
 
 JsonValue Application::config_provider() const {
+    std::lock_guard<std::mutex> config_lock(config_persist_mutex_);
     // G4 契约：Web 需要 RuntimeProfile 结构（前端 ConfigContext 深拷贝改字段 → 全量 PUT）。
     // 数据源优先级（唯一真源 = RuntimeConfig 内存 canonical）：
     //   1) runtime_config_ 内存快照（SET_CONFIG 热更新后的最新值）
@@ -782,13 +986,36 @@ JsonValue Application::config_provider() const {
 // 任何一步失败都直接返回 false；内存与磁盘均保证不被污染。
 bool Application::handle_config_update(const JsonValue& profile_json, std::string* error,
                                        bool* persisted) {
+    std::lock_guard<std::mutex> lifecycle_lock(runtime_lifecycle_mutex_);
     if (persisted) *persisted = false;
     if (!profile_json.is_object()) {
         if (error) *error = "profile 必须是 JSON 对象";
         return false;
     }
 
-    // 1) 解析（严格：非法字段/类型错误 → 失败）
+    // 1) API 原始输入严格校验：from_json() 对“磁盘历史坏配置”会执行自愈，
+    // 但 SET_CONFIG 是新写入请求，不能把非法 1×1 偷偷改成 0×0 后报告成功。
+    // 必须在解析前检查原始 capture；0=全帧，非零下限与 RuntimeProfile 一致。
+    if (const JsonValue* capture = profile_json.find("capture");
+        capture && capture->is_object()) {
+        constexpr int64_t kMinCaptureRoiPx = 64;
+        constexpr int64_t kMaxCaptureRoiPx = 3840;
+        for (const char* key : {"width", "height"}) {
+            if (const JsonValue* value = capture->find(key); value && value->is_number()) {
+                const int64_t pixels = value->as_int();
+                if (pixels != 0 &&
+                    (pixels < kMinCaptureRoiPx || pixels > kMaxCaptureRoiPx)) {
+                    if (error) {
+                        *error = std::string("profile 校验失败: capture.") + key +
+                                 " 非法（0=全帧，或需在 64~3840 之间）";
+                    }
+                    return false;
+                }
+            }
+        }
+    }
+
+    // 2) 解析 canonical profile，并执行完整语义校验
     RuntimeProfile profile = RuntimeProfile::from_json(profile_json);
     std::string validate_error;
     if (!profile.validate(&validate_error)) {
@@ -796,37 +1023,28 @@ bool Application::handle_config_update(const JsonValue& profile_json, std::strin
         return false;
     }
 
-    // 2) 内存热更新（原子替换 shared_ptr；AimThread/Worker 下个周期即读到新配置）
-    runtime_config_.update(profile);
-
-    // 3) 持久化：读回宿主配置文件（config_ 的 root），仅替换 runtime_profile 键，
-    //    其余键（app/conf/nms/...）原样保留；保存失败不撤销内存更新（热更新已生效），
-    //    以 persisted=false 告知调用方“内存已应用但落盘失败”。
-    bool saved = false;
-    if (!config_path_.empty() && config_.loaded()) {
-        JsonValue merged = config_.root();  // 深拷贝宿主 JSON
-        merged.set("runtime_profile", profile_json);
-        const std::string text = merged.dump();
-        FILE* f = std::fopen(config_path_.c_str(), "w");
-        if (f) {
-            const bool ok = std::fwrite(text.data(), 1, text.size(), f) == text.size();
-            if (std::fclose(f) != 0 && ok) {
-                saved = false;
-            } else {
-                saved = ok;
-            }
-        }
-        if (!saved && error) {
-            *error = "内存配置已生效，但写入配置文件失败: " + config_path_;
-        }
+    // model_id 代表真正完成 RKNN 加载与首帧验证的当前模型，只允许 MODEL_ACTIVATE
+    // 事务修改。普通 SET_CONFIG 改它会绕过 ModelRegistry、切换和回滚门槛。
+    if (auto current = runtime_config_.snapshot(); current && profile.model_id != current->model_id) {
+        if (error) *error = "model_id 只能通过模型激活接口修改";
+        return false;
     }
-    if (persisted) *persisted = saved;
+
+    // 3) 唯一提交入口在同一把锁内完成：canonical 落盘、ConfigManager 根节点刷新、
+    // RuntimeConfig 内存发布。并发请求因此不会产生“磁盘最后是 B、内存最后是 A”。
+    std::string persist_error;
+    if (!persist_runtime_profile(profile, &persist_error)) {
+        if (error) *error = "写入配置文件失败，现配置保持不变: " + persist_error;
+        return false;
+    }
+    if (persisted) *persisted = true;
     return true;
 }
 
 // RUNTIME_CONTROL：start / stop / restart。
 // 直接复用 CoreRuntime start/stop（幂等），不触碰平台 RuntimeController 状态机。
 bool Application::handle_runtime_control(const std::string& action, std::string* error) {
+    std::lock_guard<std::mutex> lifecycle_lock(runtime_lifecycle_mutex_);
     if (!core_runtime_) {
         if (error) *error = "core_runtime 未初始化";
         return false;
@@ -834,6 +1052,7 @@ bool Application::handle_runtime_control(const std::string& action, std::string*
     if (action == "start") {
         if (core_runtime_->running()) return true;  // 幂等
         want_runtime_running_.store(true);
+        running_model_id_.clear();
         if (!core_runtime_->start(error)) {
             if (error && error->empty()) *error = "CoreRuntime 启动失败";
             // 启动失败仍保留 want=true：主循环每 2s 自动重试，直到 HDMI/模型就绪
@@ -848,10 +1067,16 @@ bool Application::handle_runtime_control(const std::string& action, std::string*
         runtime_started_ = false;
         running_model_id_.clear();
         model_failure_code_.clear();
+        model_failure_message_.clear();
         return true;
     }
     if (action == "restart") {
         want_runtime_running_.store(true);
+        // 新运行世代在首帧 inference+decode 通过前没有 current model。
+        // 禁止 restart 返回后继续展示旧世代 running_model_id。
+        running_model_id_.clear();
+        model_failure_code_.clear();
+        model_failure_message_.clear();
         core_runtime_->stop();
         if (!core_runtime_->start(error)) {
             if (error && error->empty()) *error = "CoreRuntime 重启失败";
@@ -875,6 +1100,7 @@ static std::string incoming_dir_of(const ModelRegistry& reg) {
 bool Application::handle_model_import(const std::string& src_path, const std::string& model_id,
                                       const std::string& label, const std::string& source_format,
                                       const std::string& sha256, std::string* error) {
+    std::lock_guard<std::mutex> lifecycle_lock(runtime_lifecycle_mutex_);
     if (!model_management_) {
         if (error) *error = "模型仓库不可用（初始化失败）";
         return false;
@@ -886,9 +1112,18 @@ bool Application::handle_model_import(const std::string& src_path, const std::st
         for (char& c : s) if (c == '\\') c = '/';
         return s;
     };
-    const std::string incoming = normalize(incoming_dir_of(reg));
-    const std::string src_norm = normalize(src_path);
-    if (src_norm.rfind(incoming, 0) != 0) {
+    std::error_code path_ec;
+    const std::filesystem::path incoming_path =
+        std::filesystem::weakly_canonical(incoming_dir_of(reg), path_ec);
+    const std::filesystem::path source_path =
+        std::filesystem::weakly_canonical(src_path, path_ec);
+    const std::string incoming = normalize(incoming_path.string());
+    const std::string src_norm = normalize(source_path.string());
+    const std::string incoming_prefix = incoming.empty() || incoming.back() == '/'
+                                            ? incoming : incoming + "/";
+    // canonical 后再做“目录边界”判断：拒绝 ../、符号链接逃逸和
+    // /_incoming_fake 这类仅字符串前缀相同的相邻目录。
+    if (path_ec || src_norm.rfind(incoming_prefix, 0) != 0) {
         if (error) *error = "模型文件必须先上传到收件目录（" + incoming + "）";
         return false;
     }
@@ -904,6 +1139,7 @@ bool Application::handle_model_import(const std::string& src_path, const std::st
 }
 
 JsonValue Application::handle_model_list() {
+    std::lock_guard<std::mutex> lifecycle_lock(runtime_lifecycle_mutex_);
     JsonValue data = JsonValue::object();
     if (!model_management_) {
         data.set("models", JsonValue::array());
@@ -931,12 +1167,13 @@ JsonValue Application::handle_model_list() {
     data.set("state", JsonValue::string(selected.empty() ? "stopped" :
                                         (selected == running ? "running" : "switching")));
     data.set("failure_code", JsonValue::string(model_failure_code_));
-    data.set("failure_message", JsonValue::string(model_failure_code_));
+    data.set("failure_message", JsonValue::string(model_failure_message_));
     data.set("available", JsonValue::boolean(true));
     return data;
 }
 
 bool Application::handle_model_validate(const std::string& model_id, std::string* error) {
+    std::lock_guard<std::mutex> lifecycle_lock(runtime_lifecycle_mutex_);
     if (!model_management_) {
         if (error) *error = "模型仓库不可用";
         return false;
@@ -945,6 +1182,7 @@ bool Application::handle_model_validate(const std::string& model_id, std::string
 }
 
 bool Application::handle_model_install(const std::string& model_id, std::string* error) {
+    std::lock_guard<std::mutex> lifecycle_lock(runtime_lifecycle_mutex_);
     if (!model_management_) {
         if (error) *error = "模型仓库不可用";
         return false;
@@ -953,6 +1191,7 @@ bool Application::handle_model_install(const std::string& model_id, std::string*
 }
 
 bool Application::handle_model_activate(const std::string& model_id, std::string* error) {
+    std::lock_guard<std::mutex> lifecycle_lock(runtime_lifecycle_mutex_);
     if (!model_management_) {
         if (error) *error = "模型仓库不可用";
         return false;
@@ -964,8 +1203,12 @@ bool Application::handle_model_activate(const std::string& model_id, std::string
     const std::string previous_active = model_management_->registry().active_model();
     if (previous_active == model_id && core_runtime_ && core_runtime_->running() &&
         running_model_id_ == model_id) {
-        sync_model_id_to_profile(model_id);  // 幂等：也同步，防止历史脱节
-        return true;  // 幂等：已经是当前运行模型
+        std::string sync_error;
+        if (!sync_model_id_to_profile(model_id, &sync_error)) {
+            if (error) *error = "模型已运行，但配置同步失败: " + sync_error;
+            return false;
+        }
+        return true;  // 幂等：运行态与配置均已确认一致
     }
     if (!model_management_->registry().activate(model_id, error)) {
         return false;  // 激活校验失败：active 未变，无需回滚
@@ -980,12 +1223,31 @@ bool Application::handle_model_activate(const std::string& model_id, std::string
             std::string rb_error;
             if (!previous_active.empty() && previous_active != model_id) {
                 model_management_->registry().activate(previous_active, &rb_error);
+            } else if (previous_active.empty()) {
+                model_management_->registry().deactivate(&rb_error);
             }
             if (error) *error = "模型切换失败（runtime 未运行，拉起新模型失败已回滚）: " + switch_error;
             return false;
         }
         TTBOX_LOG_INFO("模型热切换完成（runtime 原本未运行）: running_model_id=" + running_model_id_);
-        sync_model_id_to_profile(model_id);
+        std::string sync_error;
+        if (!sync_model_id_to_profile(model_id, &sync_error)) {
+            std::string rb_error;
+            if (!previous_active.empty() && previous_active != model_id) {
+                model_management_->registry().activate(previous_active, &rb_error);
+                if (switch_active_model_runtime(previous_active, &rb_error)) {
+                    sync_model_id_to_profile(previous_active, nullptr);
+                }
+            } else if (previous_active.empty()) {
+                model_management_->registry().deactivate(&rb_error);
+                core_runtime_->stop();
+                runtime_started_ = false;
+                running_model_id_.clear();
+                want_runtime_running_.store(false);
+            }
+            if (error) *error = "新模型已启动但配置提交失败，已执行回滚: " + sync_error;
+            return false;
+        }
         return true;
     }
     if (!switch_active_model_runtime(model_id, error)) {
@@ -994,9 +1256,17 @@ bool Application::handle_model_activate(const std::string& model_id, std::string
         std::string rb_error;
         if (!previous_active.empty()) {
             model_management_->registry().activate(previous_active, &rb_error);
+        } else {
+            model_management_->registry().deactivate(&rb_error);
         }
-        if (switch_active_model_runtime(previous_active, &rb_error)) {
+        if (!previous_active.empty() && switch_active_model_runtime(previous_active, &rb_error)) {
             if (error) *error = "模型切换失败已回滚到 " + previous_active + ": " + switch_error;
+        } else if (previous_active.empty()) {
+            core_runtime_->stop();
+            runtime_started_ = false;
+            running_model_id_.clear();
+            want_runtime_running_.store(false);
+            if (error) *error = "模型切换失败，已恢复为未选择模型状态: " + switch_error;
         } else {
             // 旧模型也起不来：让主循环 2s 自动重试拉起（want 仍为 true）
             if (error) {
@@ -1006,34 +1276,133 @@ bool Application::handle_model_activate(const std::string& model_id, std::string
         return false;
     }
     TTBOX_LOG_INFO("模型热切换完成: running_model_id=" + running_model_id_);
-    sync_model_id_to_profile(model_id);
+    std::string sync_error;
+    if (!sync_model_id_to_profile(model_id, &sync_error)) {
+        std::string rb_error;
+        if (!previous_active.empty()) {
+            model_management_->registry().activate(previous_active, &rb_error);
+        } else {
+            model_management_->registry().deactivate(&rb_error);
+        }
+        if (!previous_active.empty() && switch_active_model_runtime(previous_active, &rb_error)) {
+            std::string restore_sync_error;
+            if (sync_model_id_to_profile(previous_active, &restore_sync_error)) {
+                if (error) *error = "新模型配置提交失败，已回滚到 " + previous_active + ": " + sync_error;
+            } else if (error) {
+                *error = "新模型配置提交失败，旧模型已恢复运行但配置回写失败: " + restore_sync_error;
+            }
+        } else if (previous_active.empty()) {
+            core_runtime_->stop();
+            runtime_started_ = false;
+            running_model_id_.clear();
+            want_runtime_running_.store(false);
+            if (error) *error = "新模型配置提交失败，已恢复为未选择模型状态: " + sync_error;
+        } else if (error) {
+            *error = "新模型配置提交失败且回滚失败: " + sync_error + "; " + rb_error;
+        }
+        return false;
+    }
     return true;
 }
 
-void Application::sync_model_id_to_profile(const std::string& model_id) {
-    // 1) 内存热更新：复制当前 RuntimeProfile，仅改 model_id 字段。
+bool Application::sync_model_id_to_profile(const std::string& model_id, std::string* error) {
     RuntimeProfile updated;
     if (auto base = runtime_config_.snapshot()) {
         updated = *base;
     }
     updated.model_id = model_id;
-    runtime_config_.update(updated);
+    return persist_runtime_profile(updated, error);
+}
 
-    // 2) 落盘：写回宿主配置文件 runtime_profile 键（其余键原样保留）。
-    //    失败不影响激活（active.json 才是真相源，重启仍读 active.json），仅记日志。
-    if (!config_path_.empty() && config_.loaded()) {
-        JsonValue merged = config_.root();
-        merged.set("runtime_profile", updated.to_json());
-        const std::string text = merged.dump();
-        FILE* f = std::fopen(config_path_.c_str(), "w");
-        if (f) {
-            const bool ok = std::fwrite(text.data(), 1, text.size(), f) == text.size();
-            std::fclose(f);
-            if (!ok) TTBOX_LOG_WARN("模型切换后同步 model_id 落盘失败: " + config_path_);
-        } else {
-            TTBOX_LOG_WARN("模型切换后同步 model_id 无法打开配置: " + config_path_);
+bool Application::persist_runtime_profile(const RuntimeProfile& profile, std::string* error) {
+    std::lock_guard<std::mutex> lock(config_persist_mutex_);
+    if (config_path_.empty() || !config_.loaded()) {
+        if (error) *error = "配置文件未加载";
+        return false;
+    }
+
+    JsonValue merged = config_.root();
+    merged.set("runtime_profile", profile.to_json());
+    const std::string text = merged.dump();
+    const std::filesystem::path final_path(config_path_);
+    const std::filesystem::path tmp_path = final_path.string() + ".tmp";
+#if defined(_WIN32)
+    {
+        std::ofstream out(tmp_path, std::ios::binary | std::ios::trunc);
+        if (!out) {
+            if (error) *error = "无法创建配置临时文件: " + tmp_path.string();
+            return false;
+        }
+        out.write(text.data(), static_cast<std::streamsize>(text.size()));
+        out.flush();
+        if (!out.good()) {
+            out.close();
+            std::error_code rm_ec;
+            std::filesystem::remove(tmp_path, rm_ec);
+            if (error) *error = "配置临时文件写入失败: " + tmp_path.string();
+            return false;
         }
     }
+#else
+    // Linux 板端使用 write + fsync，确保临时文件内容真正进入存储设备后才 rename。
+    const int fd = ::open(tmp_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) {
+        if (error) *error = "无法创建配置临时文件: " + tmp_path.string();
+        return false;
+    }
+    size_t written = 0;
+    bool write_ok = true;
+    while (written < text.size()) {
+        const ssize_t n = ::write(fd, text.data() + written, text.size() - written);
+        if (n <= 0) {
+            write_ok = false;
+            break;
+        }
+        written += static_cast<size_t>(n);
+    }
+    if (write_ok) write_ok = (::fsync(fd) == 0);
+    if (::close(fd) != 0) write_ok = false;
+    if (!write_ok) {
+        std::error_code rm_ec;
+        std::filesystem::remove(tmp_path, rm_ec);
+        if (error) *error = "配置临时文件写入或同步失败: " + tmp_path.string();
+        return false;
+    }
+#endif
+
+    std::error_code ec;
+#if defined(_WIN32)
+    // Windows 的 std::filesystem::rename 不覆盖现有文件，直接使用系统替换语义，
+    // 避免“先删旧文件、再改名”产生配置暂时不存在的窗口。
+    if (!::MoveFileExW(tmp_path.c_str(), final_path.c_str(),
+                       MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        ec = std::error_code(static_cast<int>(::GetLastError()), std::system_category());
+    }
+#else
+    std::filesystem::rename(tmp_path, final_path, ec);
+#endif
+    if (ec) {
+        std::error_code rm_ec;
+        std::filesystem::remove(tmp_path, rm_ec);
+        if (error) *error = "配置原子替换失败: " + ec.message();
+        return false;
+    }
+#if !defined(_WIN32)
+    // rename 的目录项也要同步，确保断电后新文件名仍然存在。
+    const std::filesystem::path parent = final_path.has_parent_path()
+                                             ? final_path.parent_path()
+                                             : std::filesystem::path(".");
+    const int dir_fd = ::open(parent.c_str(), O_RDONLY | O_DIRECTORY);
+    if (dir_fd < 0 || ::fsync(dir_fd) != 0) {
+        if (dir_fd >= 0) ::close(dir_fd);
+        TTBOX_LOG_WARN("配置已原子替换，但父目录同步失败: " + parent.string());
+    } else {
+        ::close(dir_fd);
+    }
+#endif
+    config_.replace_root(std::move(merged));
+    runtime_config_.update(profile);
+    return true;
 }
 
 bool Application::switch_active_model_runtime(const std::string& new_model_id,
@@ -1042,10 +1411,13 @@ bool Application::switch_active_model_runtime(const std::string& new_model_id,
         if (error) *error = "core_runtime 或模型仓库未初始化";
         return false;
     }
-    // 1) 停止当前流水线（capture/worker/aim/preview 全部停干净，引用与 DMA 全释放）
+    // 1) 准备切换模型：热切换保留 capture 在跑，停机时才需全量停止
     want_runtime_running_.store(false);  // 防止主循环 2s 重试在我们重建期间抢跑
-    core_runtime_->stop();
-    runtime_started_ = false;
+    const bool was_running = core_runtime_->running();
+    if (!was_running) {
+        core_runtime_->stop();
+        runtime_started_ = false;
+    }
     running_model_id_.clear();
 
     // 2) 以新 active 模型重建 Worker 参数（build_runtime_params 读 registry active）
@@ -1056,19 +1428,28 @@ bool Application::switch_active_model_runtime(const std::string& new_model_id,
         want_runtime_running_.store(true);
         return false;
     }
-    // 3) 重初始化 CoreRuntime（worker_params_ 仅在 initialize 时拷入，必须重走）
-    if (!core_runtime_->initialize(rt_params, &rt_error)) {
-        if (error) *error = "CoreRuntime 重初始化失败: " + rt_error;
-        want_runtime_running_.store(true);
-        return false;
+    if (was_running) {
+        // 3) 热切换：同一路 V4L2 采集保持在跑，只重建 RKNN worker 池
+        if (!core_runtime_->reload_workers(rt_params.workers, &rt_error)) {
+            if (error) *error = "新模型 worker 热切换失败: " + rt_error;
+            want_runtime_running_.store(true);
+            return false;
+        }
+    } else {
+        // 3) 重初始化 CoreRuntime（worker_params_ 仅在 initialize 时拷入，必须重走）
+        if (!core_runtime_->initialize(rt_params, &rt_error)) {
+            if (error) *error = "CoreRuntime 重初始化失败: " + rt_error;
+            want_runtime_running_.store(true);
+            return false;
+        }
+        // 4) 启动新模型
+        if (!core_runtime_->start(&rt_error)) {
+            if (error) *error = "新模型启动失败: " + rt_error;
+            want_runtime_running_.store(true);
+            return false;
+        }
+        runtime_started_ = true;
     }
-    // 4) 启动新模型
-    if (!core_runtime_->start(&rt_error)) {
-        if (error) *error = "新模型启动失败: " + rt_error;
-        want_runtime_running_.store(true);
-        return false;
-    }
-    runtime_started_ = true;
     want_runtime_running_.store(true);
 
     // 5) 首帧门槛：等待真实推理+Decode 成功（最多 5s），通过才提交 running_model_id
@@ -1078,6 +1459,7 @@ bool Application::switch_active_model_runtime(const std::string& new_model_id,
         if (core_runtime_->model_ready()) {
             running_model_id_ = new_model_id;
             model_failure_code_.clear();
+            model_failure_message_.clear();
             return true;
         }
         if (!core_runtime_->running()) {
@@ -1090,11 +1472,33 @@ bool Application::switch_active_model_runtime(const std::string& new_model_id,
 }
 
 bool Application::handle_model_remove(const std::string& model_id, std::string* error) {
+    std::lock_guard<std::mutex> lifecycle_lock(runtime_lifecycle_mutex_);
     if (!model_management_) {
         if (error) *error = "模型仓库不可用";
         return false;
     }
     return model_management_->registry().remove(model_id, error);
+}
+
+bool Application::handle_model_set_concurrency(const std::string& model_id, int count,
+                                               std::string* error) {
+    std::lock_guard<std::mutex> lifecycle_lock(runtime_lifecycle_mutex_);
+    if (!model_management_) {
+        if (error) *error = "模型仓库不可用";
+        return false;
+    }
+    if (!model_management_->registry().set_concurrency(model_id, count, error)) {
+        return false;
+    }
+    // 当前运行的是该模型时，立即重建 worker 池使并发生效；否则下次启动该模型时生效。
+    if (core_runtime_ && core_runtime_->running() && running_model_id_ == model_id) {
+        std::string switch_error;
+        if (!switch_active_model_runtime(model_id, &switch_error)) {
+            if (error) *error = "并发已保存，但运行时重建失败: " + switch_error;
+            return false;
+        }
+    }
+    return true;
 }
 
 }  // namespace ttbox::core

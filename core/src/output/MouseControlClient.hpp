@@ -22,7 +22,7 @@ struct MouseControlTelemetry {
 
 class MouseControlClient {
 public:
-    explicit MouseControlClient(std::string socket_path = "/run/orangepi-mouse-passthrough/cmd.sock")
+    explicit MouseControlClient(std::string socket_path = "/run/ttbox-mouse-passthrough/cmd.sock")
         : socket_path_(std::move(socket_path)) {}
     ~MouseControlClient();
 

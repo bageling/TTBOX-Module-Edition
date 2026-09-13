@@ -7,9 +7,22 @@ USB_PROXY_DRIVER=${USB_PROXY_DRIVER:-dwc3-gadget}
 USB_PROXY_WAIT_SECONDS=${USB_PROXY_WAIT_SECONDS:-1}
 USB_PROXY_EXTRA_ARGS=${USB_PROXY_EXTRA_ARGS:-}
 USB_PROXY_MODE=${USB_PROXY_MODE:-full}   # full | synthetic
+USB_PROXY_SOCKET_DIR=${USB_PROXY_SOCKET_DIR:-/run/ttbox-mouse-passthrough}
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PROJECT_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
+
+stop_conflicting_services()
+{
+	# TTBOX 独占 UDC：把板端其它 USB 透传服务先停掉，避免和 raw-gadget 抢控制器。
+	for unit in usb-proxy.service usb-proxy-test.service mouse-passthrough.service \
+		opi-mouse-gadget.service usbdevice.service; do
+		if systemctl is-active --quiet "$unit" 2>/dev/null; then
+			systemctl stop "$unit" >/dev/null 2>&1 || true
+			printf 'Stopped conflicting service %s\n' "$unit"
+		fi
+	done
+}
 
 find_mouse()
 {
@@ -33,6 +46,8 @@ find_mouse()
 }
 
 cd "$PROJECT_DIR"
+mkdir -p "$USB_PROXY_SOCKET_DIR"
+stop_conflicting_services
 
 while [ ! -e "/sys/class/udc/$USB_PROXY_DEVICE" ]; do
 	printf 'Waiting for USB device controller %s...\n' "$USB_PROXY_DEVICE"
@@ -40,6 +55,8 @@ while [ ! -e "/sys/class/udc/$USB_PROXY_DEVICE" ]; do
 done
 
 ARGS="--device=$USB_PROXY_DEVICE --driver=$USB_PROXY_DRIVER"
+ARGS="$ARGS --mouse_control_cmd_socket=$USB_PROXY_SOCKET_DIR/cmd.sock"
+ARGS="$ARGS --mouse_control_event_socket=$USB_PROXY_SOCKET_DIR/event.sock"
 
 if [ "$USB_PROXY_MODE" = "synthetic" ]; then
 	printf 'TTBOX usb-proxy synthetic mode\n'

@@ -78,22 +78,37 @@ bool MouseControlClient::send_move(int32_t dx, int32_t dy, int32_t wheel, std::s
 #else
     if (fd_ < 0 && !connect(error)) return false;
     const auto packet = encode_move(next_request_id_, dx, dy, wheel);
-    const ssize_t n = ::send(fd_, packet.data(), packet.size(), MSG_NOSIGNAL);
+    auto record_success = [&]() {
+        ++next_request_id_;
+        if (next_request_id_ == 0) next_request_id_ = 1;
+        socket_write_ok_.fetch_add(1, std::memory_order_relaxed);
+        last_dx_.store(dx, std::memory_order_relaxed);
+        last_dy_.store(dy, std::memory_order_relaxed);
+        last_wheel_.store(wheel, std::memory_order_relaxed);
+        last_timestamp_us_.store(static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count()), std::memory_order_relaxed);
+        return true;
+    };
+    auto do_send = [&]() -> ssize_t {
+        return ::send(fd_, packet.data(), packet.size(), MSG_NOSIGNAL);
+    };
     send_count_.fetch_add(1, std::memory_order_relaxed);
+    ssize_t n = do_send();
     if (n != static_cast<ssize_t>(packet.size())) {
         socket_write_fail_.fetch_add(1, std::memory_order_relaxed);
         if (error) *error = std::strerror(errno);
         disconnect();
+        // 首帧失败大概率是 usb-proxy 刚重启/换线：断开后立即重连重发，
+        // 避免热键第一帧注入丢失（等下一帧再重连至少要空跑一个轮询周期）。
+        if (connect(error)) {
+            n = do_send();
+            if (n == static_cast<ssize_t>(packet.size())) return record_success();
+            socket_write_fail_.fetch_add(1, std::memory_order_relaxed);
+            if (error) *error = std::strerror(errno);
+            disconnect();
+        }
         return false;
     }
-    ++next_request_id_;
-    if (next_request_id_ == 0) next_request_id_ = 1;
-    socket_write_ok_.fetch_add(1, std::memory_order_relaxed);
-    last_dx_.store(dx, std::memory_order_relaxed);
-    last_dy_.store(dy, std::memory_order_relaxed);
-    last_wheel_.store(wheel, std::memory_order_relaxed);
-    last_timestamp_us_.store(static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count()), std::memory_order_relaxed);
-    return true;
+    return record_success();
 #endif
 }
 

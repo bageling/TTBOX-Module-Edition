@@ -2884,6 +2884,10 @@ html[data-theme="light"] .crosshair-color-swatch {
   z-index: 1;
 }
 
+.model-card:has(.model-game-suggestion-list:not([hidden])) {
+  z-index: 5;
+}
+
 .model-card.is-missing {
   border-color: rgba(255, 105, 127, 0.64);
   background:
@@ -3010,6 +3014,8 @@ html[data-theme="light"] .crosshair-color-swatch {
 .model-remote-frame-option-list,
 .model-rknn-concurrency-option-list,
 .model-hailo-pipeline-option-list {
+  position: absolute;
+  top: calc(100% + 6px);
   left: auto;
   right: 0;
   min-width: 168px;
@@ -3200,9 +3206,11 @@ html[data-theme="light"] .crosshair-color-swatch {
 }
 
 .model-preset-option-list {
-  position: static;
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
   max-height: 170px;
-  margin-top: 6px;
   z-index: 1000;
 }
 
@@ -5211,6 +5219,25 @@ html[data-theme="light"] .toast {
     position: static;
     max-height: 190px;
     margin-top: 6px;
+  }
+
+  /* 模型卡上的标签下拉保持浮层，不能被上传对话框的 static 规则覆盖 */
+  .model-card-game-option-list,
+  .model-remote-frame-option-list,
+  .model-rknn-concurrency-option-list,
+  .model-hailo-pipeline-option-list,
+  .model-preset-option-list {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: auto;
+    right: 0;
+    min-width: 168px;
+  }
+
+  .model-preset-option-list {
+    left: 0;
+    right: 0;
+    min-width: 0;
   }
 
   .modal-backdrop {

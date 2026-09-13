@@ -120,8 +120,14 @@ public:
     // 最近一次选择的 reason（供外部观测）
     TargetSelection::Reason last_reason() const { return last_reason_; }
 
-    // 重置所有 track（目标切换/瞄准退出时）
-    void reset() { tracks_.clear(); active_track_ = -1; last_reason_ = TargetSelection::kNone; }
+    // 重置所有 track（目标切换/模型切换/瞄准退出时）。
+    // 新运行世代的 track id 从 1 重新开始，禁止继承旧模型身份空间。
+    void reset() {
+        tracks_.clear();
+        active_track_ = -1;
+        last_reason_ = TargetSelection::kNone;
+        next_id_ = 1;
+    }
 
     const std::vector<TrackEntry>& tracks() const { return tracks_; }
 

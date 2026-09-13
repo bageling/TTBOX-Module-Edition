@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import ast
+import hashlib
+import json
 import math
 import re
 import shutil
@@ -75,6 +77,35 @@ def write_dataset_file(images: list[Path], dataset_file: Path) -> None:
     dataset_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def image_signature(images: list[Path]) -> str:
+    """确定性记录校准集内容，避免换图后误以为仍是同一量化模型。"""
+    digest = hashlib.sha256()
+    for path in images:
+        digest.update(str(path.name).encode("utf-8"))
+        digest.update(str(path.stat().st_size).encode("ascii"))
+        digest.update(str(path.stat().st_mtime_ns).encode("ascii"))
+    return digest.hexdigest()
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def validate_calibration_images(images: list[Path], minimum: int) -> None:
+    if len(images) < minimum:
+        raise ValueError(
+            f"Calibration dataset has only {len(images)} images; at least {minimum} are required "
+            "for a stable INT8 export."
+        )
+    bad = [str(path) for path in images if path.stat().st_size < 1024]
+    if bad:
+        raise ValueError("Calibration images are suspiciously small: " + ", ".join(bad[:5]))
+
+
 def default_stage_dir(onnx_path: Path, dataset_count: int) -> Path:
     return onnx_path.with_name(f"{onnx_path.stem}_calibration_{dataset_count}_images")
 
@@ -119,11 +150,27 @@ def producer_map(graph: onnx.GraphProto) -> dict[str, onnx.NodeProto]:
 
 
 def infer_shape_map(model: onnx.ModelProto) -> dict[str, list[int | str]]:
-    inferred = shape_inference.infer_shapes(model)
     shape_map: dict[str, list[int | str]] = {}
-    value_infos = list(inferred.graph.value_info) + list(inferred.graph.input) + list(inferred.graph.output)
-    for value_info in value_infos:
-        shape_map[value_info.name] = tensor_dims(value_info)
+    try:
+        inferred = shape_inference.infer_shapes(model)
+        value_infos = (
+            list(inferred.graph.value_info)
+            + list(inferred.graph.input)
+            + list(inferred.graph.output)
+        )
+        for value_info in value_infos:
+            shape_map[value_info.name] = tensor_dims(value_info)
+    except Exception:
+        # Fallback 只使用 ONNX 文件里已经带出的形状，不再触发 shape inference。
+        # --skip-shape-inference 失败重试路径和畸形图都能继续走 graph 导出。
+        for value_info in (
+            list(model.graph.value_info)
+            + list(model.graph.input)
+            + list(model.graph.output)
+        ):
+            shape_map[value_info.name] = tensor_dims(value_info)
+        for initializer in model.graph.initializer:
+            shape_map[initializer.name] = list(initializer.dims)
     return shape_map
 
 
@@ -229,7 +276,12 @@ def normalize_resize_empty_roi_inputs(model: onnx.ModelProto) -> list[str]:
     ]
 
 
-def prepare_model_for_rknn(model: onnx.ModelProto, onnx_path: Path, workspace: Path) -> tuple[onnx.ModelProto, Path, list[str]]:
+def prepare_model_for_rknn(
+    model: onnx.ModelProto,
+    onnx_path: Path,
+    workspace: Path,
+    skip_shape_inference: bool = False,
+) -> tuple[onnx.ModelProto, Path, list[str]]:
     prepared = model
     rewrite_required = False
     notes: list[str] = []
@@ -244,16 +296,17 @@ def prepare_model_for_rknn(model: onnx.ModelProto, onnx_path: Path, workspace: P
         rewrite_required = True
         notes.append("ONNX graph nodes were topologically reordered for RKNN Toolkit compatibility.")
 
-    before_value_infos = graph_value_info_names(prepared)
-    try:
-        inferred = shape_inference.infer_shapes(prepared)
-        after_value_infos = graph_value_info_names(inferred)
-        if after_value_infos != before_value_infos:
-            rewrite_required = True
-            notes.append("ONNX value_info entries were refreshed with shape inference.")
-        prepared = inferred
-    except Exception as exc:
-        notes.append(f"Warning: ONNX shape inference failed while preparing RKNN input: {exc}")
+    if not skip_shape_inference:
+        before_value_infos = graph_value_info_names(prepared)
+        try:
+            inferred = shape_inference.infer_shapes(prepared)
+            after_value_infos = graph_value_info_names(inferred)
+            if after_value_infos != before_value_infos:
+                rewrite_required = True
+                notes.append("ONNX value_info entries were refreshed with shape inference.")
+            prepared = inferred
+        except Exception as exc:
+            notes.append(f"Warning: ONNX shape inference failed while preparing RKNN input: {exc}")
 
     if not rewrite_required:
         return prepared, onnx_path, notes
@@ -978,8 +1031,25 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--dataset-count",
         type=int,
-        default=5,
-        help="How many calibration images to sample evenly from the dataset root.",
+        default=100,
+        help="How many calibration images to sample evenly from the dataset root (INT8 default: 100).",
+    )
+    parser.add_argument(
+        "--minimum-calibration-images",
+        type=int,
+        default=32,
+        help="Minimum usable images required before an INT8 build is allowed.",
+    )
+    parser.add_argument(
+        "--quantized-dtype",
+        choices=["w8a8", "w8a16", "w16a16i", "w16a16i_dfp", "w4a16", "asymmetric_quantized-8", "asymmetric_quantized-16"],
+        default="w8a8",
+        help="RKNN quantization scheme passed to RKNN.config() (rknn_toolkit2 2.x names; legacy asymmetric names are accepted and auto-mapped).",
+    )
+    parser.add_argument(
+        "--no-quantization",
+        action="store_true",
+        help="Export a floating-point RKNN model for A/B comparison; skips calibration requirements.",
     )
     parser.add_argument("--input-width", type=int, default=None, help="Optional input width override.")
     parser.add_argument("--input-height", type=int, default=None, help="Optional input height override.")
@@ -1026,6 +1096,11 @@ def parse_args() -> argparse.Namespace:
             "and force graph-mode export."
         ),
     )
+    parser.add_argument(
+        "--skip-shape-inference",
+        action="store_true",
+        help="Skip ONNX shape inference during preparation (fallback path used by the web retry).",
+    )
     return parser.parse_args()
 
 
@@ -1044,8 +1119,49 @@ def convert_one_model(
     stage_dir = (runtime_workspace / "calibration_images").resolve()
     runtime_dataset_file = (runtime_workspace / "calibration.txt").resolve()
     temporary_paths = [runtime_workspace]
-    model, rknn_onnx_path, prepare_notes = prepare_model_for_rknn(model, onnx_path, runtime_workspace)
+    model, rknn_onnx_path, prepare_notes = prepare_model_for_rknn(
+        model,
+        onnx_path,
+        runtime_workspace,
+        args.skip_shape_inference,
+    )
     metadata = {item.key: item.value for item in model.metadata_props}
+
+    # rknn_toolkit2 2.x dropped the legacy asymmetric/dynamic names that the
+    # old toolkit accepted. Map them to the equivalent modern scheme before
+    # passing to RKNN.config() so older command lines keep working.
+    legacy_mapping = {
+        "asymmetric_quantized-8": "w8a8",
+        "asymmetric_quantized-16": "w16a16i",
+        "dynamic_fixed_point-8": "w8a8",
+    }
+    quant_scheme = args.quantized_dtype
+    if quant_scheme in legacy_mapping:
+        print(
+            f"Note: quantized dtype {quant_scheme!r} is a legacy rknn_toolkit1 name, "
+            f"mapping to {legacy_mapping[quant_scheme]!r} for rknn_toolkit2.",
+            file=sys.stderr,
+        )
+        quant_scheme = legacy_mapping[quant_scheme]
+    args.quantized_dtype = quant_scheme
+
+    # Platform capability guard (verified on rknn_toolkit2 2.3.2 / RK3588):
+    #   - w8a16 / w4a16  -> rejected by config() on rk3588 (ValueError)
+    #   - w16a16i        -> converts OK but current runtime fails with
+    #                       "failed to submit!" (op id 1 Conv), so it is unusable
+    #                       on this target for now.
+    if args.target_platform.startswith(("rk3588", "rk356")):
+        if args.quantized_dtype in ("w8a16", "w4a16"):
+            raise ValueError(
+                f"quantized_dtype={args.quantized_dtype} is not supported on "
+                f"{args.target_platform} by rknn_toolkit2. Use w8a8 instead."
+            )
+        if args.quantized_dtype in ("w16a16i", "w16a16i_dfp"):
+            print(
+                "Warning: w16a16i converts on rk3588 but the bundled runtime "
+                "reports 'failed to submit' at inference; only w8a8 is known to run.",
+                file=sys.stderr,
+            )
     class_names = parse_names(metadata)
     input_name, input_height, input_width = detect_input_spec(model, args.input_height, args.input_width)
     shape_map = infer_shape_map(model)
@@ -1113,9 +1229,17 @@ def convert_one_model(
     if not all_images:
         raise FileNotFoundError(f"No calibration images found under: {dataset_root}")
 
+    if not args.no_quantization:
+        # 当用户明确要求少量校准图（--dataset-count 5）时，最低门槛随实际抽样数
+        # 收敛，避免"用户给了 10 张却硬说至少 32 张"的隐性失败；大批量仍保留
+        # 32 张的稳定性底线。
+        requested_count = max(1, args.dataset_count)
+        validate_calibration_images(
+            all_images, min(args.minimum_calibration_images, requested_count))
+
     rknn = None
     try:
-        sampled_images = evenly_sample(all_images, args.dataset_count)
+        sampled_images = evenly_sample(all_images, requested_count)
         staged_images = stage_calibration_images(sampled_images, stage_dir)
         write_dataset_file(staged_images, runtime_dataset_file)
         if dataset_file is not None:
@@ -1127,6 +1251,7 @@ def convert_one_model(
         print(f"Dataset root: {dataset_root}")
         print(f"Calibration images discovered: {len(all_images)}")
         print(f"Calibration images used: {len(sampled_images)}")
+        print(f"Calibration signature: {image_signature(sampled_images)}")
         print(f"Calibration stage dir: {stage_dir}")
         print(f"Calibration manifest: {runtime_dataset_file}")
         if dataset_file is not None:
@@ -1140,7 +1265,7 @@ def convert_one_model(
             target_platform=args.target_platform,
             mean_values=mean_values,
             std_values=std_values,
-            quantized_dtype="asymmetric_quantized-8",
+            quantized_dtype=args.quantized_dtype,
         )
         if ret != 0:
             print(f"rknn.config failed: {ret}", file=sys.stderr)
@@ -1156,7 +1281,10 @@ def convert_one_model(
             print(f"rknn.load_onnx failed: {ret}", file=sys.stderr)
             return ret
 
-        ret = rknn.build(do_quantization=True, dataset=str(runtime_dataset_file).replace("\\", "/"))
+        build_kwargs = {"do_quantization": not args.no_quantization}
+        if not args.no_quantization:
+            build_kwargs["dataset"] = str(runtime_dataset_file).replace("\\", "/")
+        ret = rknn.build(**build_kwargs)
         if ret != 0:
             print(f"rknn.build failed: {ret}", file=sys.stderr)
             return ret
@@ -1167,7 +1295,26 @@ def convert_one_model(
             print(f"rknn.export_rknn failed: {ret}", file=sys.stderr)
             return ret
 
+        if not output_path.exists() or output_path.stat().st_size < 4096:
+            raise RuntimeError(f"RKNN export produced an invalid artifact: {output_path}")
+        artifact_sha256 = file_sha256(output_path)
+        metadata_path = output_path.with_suffix(output_path.suffix + ".json")
+        metadata_path.write_text(json.dumps({
+            "source_onnx": str(onnx_path),
+            "output": str(output_path),
+            "output_size_bytes": output_path.stat().st_size,
+            "output_sha256": artifact_sha256,
+            "target_platform": args.target_platform,
+            "quantized": not args.no_quantization,
+            "quantized_dtype": None if args.no_quantization else args.quantized_dtype,
+            "dataset_count": len(sampled_images),
+            "calibration_signature": image_signature(sampled_images),
+            "input_name": input_name,
+            "input_shape": [1, 3, input_height, input_width],
+            "output_layout": output_layout,
+        }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         print(f"RKNN exported successfully: {output_path}")
+        print(f"Conversion metadata: {metadata_path}")
         return 0
     finally:
         if rknn is not None:

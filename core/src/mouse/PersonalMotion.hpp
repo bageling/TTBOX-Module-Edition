@@ -11,7 +11,7 @@ class PersonalMotion {
 public:
     // 根据当前误差距离（像素）返回默认输出倍率与个人曲线的混合倍率。
     // knots 按误差距离归一化到 0~128 像素均匀采样。
-    float scale(float error_distance, const PersonalMotionConfig& config) const;
+    static float scale(float error_distance, const PersonalMotionConfig& config);
 
 private:
     static bool valid(const PersonalMotionConfig& config);

@@ -9,10 +9,13 @@
 #include "mouse/AimPointProfile.hpp"
 #include "mouse/PersonalMotion.hpp"
 #include "mouse/PersonalTrajectoryShader.hpp"
+#include "common/CpuAffinity.hpp"
+#include "common/Logger.hpp"
 namespace ttbox::core::aim {
 bool AimThread::start(AimTargetMailbox* mailbox, std::shared_ptr<output::IHidOutput> output, int interval_us, RuntimeConfig* runtime_config, std::atomic<uint16_t>* physical_buttons) {
     if (!mailbox || !output || running_.exchange(true)) return false;
     mailbox_ = mailbox; output_ = std::move(output); interval_us_ = interval_us > 0 ? interval_us : 4000; runtime_config_ = runtime_config; physical_buttons_ = physical_buttons;
+    reset_runtime_state();
     { std::lock_guard<std::mutex> lk(status_mutex_); status_ = {}; status_.running = true; }
     // pid1.cpp main() 原始参数：X predict=3.0，Y predict=0.0。
     pid_x_.init(25.0, 25.0, 3.0, 0.3, 9900.0);
@@ -20,13 +23,45 @@ bool AimThread::start(AimTargetMailbox* mailbox, std::shared_ptr<output::IHidOut
     thread_ = std::thread(&AimThread::loop, this);
     return true;
 }
+
+void AimThread::reset_runtime_state() {
+    selector_.reset();
+    state_machine_.reset();
+    tracker_.reset();
+    pid_x_.reset();
+    pid_y_.reset();
+    pull_curve_.reset();
+    personal_shader_.reset();
+    recoil_.reset();
+    display_smooth_x1_.reset();
+    display_smooth_y1_.reset();
+    display_smooth_x2_.reset();
+    display_smooth_y2_.reset();
+    last_display_target_id_ = -1;
+    last_display_ts_us_ = 0;
+    target_age_ms_ = 0.0f;
+    last_timestamp_us_ = 0;
+    remainder_x_ = 0.0f;
+    remainder_y_ = 0.0f;
+    last_target_id_ = -1;
+}
 void AimThread::stop() {
     if (!running_.exchange(false)) return;
     if (thread_.joinable()) thread_.join();
     std::lock_guard<std::mutex> lk(status_mutex_); status_.running = false;
 }
-AimThread::Status AimThread::status() const { std::lock_guard<std::mutex> lk(status_mutex_); return status_; }
+AimThread::Status AimThread::status() const {
+    std::lock_guard<std::mutex> lk(status_mutex_);
+    return status_;
+}
 void AimThread::loop() {
+    // 瞄准控制链对延迟敏感，固定在大核运行，避免被调度到小核产生抖动。
+    {
+        std::string aerr;
+        if (!CpuAffinity::set_thread_affinity(CpuAffinity::kBigCoreMask, &aerr)) {
+            TTBOX_LOG_WARN("AimThread 绑定大核失败: " + aerr);
+        }
+    }
     uint64_t last_frame = 0;
     while (running_.load(std::memory_order_acquire)) {
         AimTargetTask task;
@@ -49,34 +84,35 @@ void AimThread::loop() {
             float kp_x = 0.0f, kp_y = 0.0f, kd_x = 0.0f, kd_y = 0.0f;
             AimPointProfile aim_point;
             LockConfirmConfig lock_confirm_cfg;  // 目标锁定确认（ENTER/HOLD，第2项）
+            std::shared_ptr<const RuntimeProfile> frame_profile;
             if (runtime_config_) {
-                auto profile = runtime_config_->snapshot();
-                if (profile) {
-                    scfg.fov_range = profile->fov.enabled ? profile->fov.radius * 2.0f : 1.0f;
-                    scfg.lost_grace_ms = profile->mouse.lost_grace_ms;
-                    scfg.confidence = profile->mouse.confidence > 0.0f
-                                          ? profile->mouse.confidence : 0.25f;
-                    scfg.aim_ratio_x = profile->mouse.aim_point.offset_x;
-                    scfg.aim_ratio_y = profile->mouse.aim_point.offset_y;
-                    kp_x = profile->mouse.kp_x; kp_y = profile->mouse.kp_y;
-                    kd_x = profile->mouse.kd_x; kd_y = profile->mouse.kd_y;
-                    aim_point = profile->mouse.aim_point;
-                    // 输出链参数：sens 全局缩放 × output_scale × output_deadzone
-                    out_sensitivity = profile->mouse.sensitivity;
-                    out_scale = profile->mouse.output_scale;
-                    out_deadzone = profile->mouse.output_deadzone;
-                    recoil_px_per_count = profile->mouse.gain_y_px_per_count > 0.05f
-                                              ? profile->mouse.gain_y_px_per_count : 0.65f;
-                    personal_motion = profile->mouse.personal_motion;
-                    pull_curve_cfg = profile->mouse.pull_curve;
-                    personal_traj_cfg = profile->mouse.personal_trajectory;
-                    lock_confirm_cfg = profile->mouse.lock_confirm;
-                    recoil_cfg = profile->mouse.recoil;
-                    pid_x_.configure(kp_x, kd_x, profile->mouse.predict_x,
-                                     profile->mouse.rate_x, profile->mouse.smooth_x);
-                    pid_y_.configure(kp_y, kd_y, profile->mouse.predict_y,
-                                     profile->mouse.rate_y, profile->mouse.smooth_y);
-                }
+                frame_profile = runtime_config_->snapshot();
+            }
+            if (frame_profile) {
+                scfg.fov_range = frame_profile->fov.enabled ? frame_profile->fov.radius * 2.0f : 1.0f;
+                scfg.lost_grace_ms = frame_profile->mouse.lost_grace_ms;
+                scfg.confidence = frame_profile->mouse.confidence > 0.0f
+                                      ? frame_profile->mouse.confidence : 0.25f;
+                scfg.aim_ratio_x = frame_profile->mouse.aim_point.offset_x;
+                scfg.aim_ratio_y = frame_profile->mouse.aim_point.offset_y;
+                kp_x = frame_profile->mouse.kp_x; kp_y = frame_profile->mouse.kp_y;
+                kd_x = frame_profile->mouse.kd_x; kd_y = frame_profile->mouse.kd_y;
+                aim_point = frame_profile->mouse.aim_point;
+                // 输出链参数：sens 全局缩放 × output_scale × output_deadzone
+                out_sensitivity = frame_profile->mouse.sensitivity;
+                out_scale = frame_profile->mouse.output_scale;
+                out_deadzone = frame_profile->mouse.output_deadzone;
+                recoil_px_per_count = frame_profile->mouse.gain_y_px_per_count > 0.05f
+                                          ? frame_profile->mouse.gain_y_px_per_count : 0.65f;
+                personal_motion = frame_profile->mouse.personal_motion;
+                pull_curve_cfg = frame_profile->mouse.pull_curve;
+                personal_traj_cfg = frame_profile->mouse.personal_trajectory;
+                lock_confirm_cfg = frame_profile->mouse.lock_confirm;
+                recoil_cfg = frame_profile->mouse.recoil;
+                pid_x_.configure(kp_x, kd_x, frame_profile->mouse.predict_x,
+                                 frame_profile->mouse.rate_x, frame_profile->mouse.smooth_x);
+                pid_y_.configure(kp_y, kd_y, frame_profile->mouse.predict_y,
+                                 frame_profile->mouse.rate_y, frame_profile->mouse.smooth_y);
             }
             const auto selected = selector_.select(task.detections, scfg,
                 static_cast<uint32_t>(task.timestamp_us / 1000ULL));
@@ -85,20 +121,17 @@ void AimThread::loop() {
             uint16_t hotkey_bits = 0;
             bool injection_allowed = false;
             if (physical_buttons_) hotkey_bits = physical_buttons_->load(std::memory_order_acquire);
-            if (runtime_config_) {
-                auto p = runtime_config_->snapshot();
-                if (p) {
-                    const bool a = (hotkey_bits & p->mouse.aim_hotkey) != 0;
-                    const bool b = p->mouse.aim_hotkey2 != 0 && (hotkey_bits & p->mouse.aim_hotkey2) != 0;
-                    // 鼠标五键统一位图：左1、右2、中4、侧1 8、侧2 16。
-                    // 热键位全部来自用户配置快照（每周期重读 → 改配置即时生效，无需重启）。
-                    // mouse.enabled 是总开关；any 模式主/副键任一命中即可，all 模式需同时按下。
-                    // A11 标定闭环：calibrating=true 期间无视物理热键强制放行
-                    // （标定线程注入运动帧，物理鼠标不参与），与 C 桥 compute_aiming 语义一致。
-                    injection_allowed = p->mouse.calibrating ||
-                                        (p->mouse.enabled &&
-                                        (p->mouse.aim_hotkey_mode == 1 ? (a && b) : (a || b)));
-                }
+            if (frame_profile) {
+                const bool a = (hotkey_bits & frame_profile->mouse.aim_hotkey) != 0;
+                const bool b = frame_profile->mouse.aim_hotkey2 != 0 && (hotkey_bits & frame_profile->mouse.aim_hotkey2) != 0;
+                // 鼠标五键统一位图：左1、右2、中4、侧1 8、侧2 16。
+                // 热键位全部来自用户配置快照（每周期重读 → 改配置即时生效，无需重启）。
+                // mouse.enabled 是总开关；any 模式主/副键任一命中即可，all 模式需同时按下。
+                // A11 标定闭环：calibrating=true 期间无视物理热键强制放行
+                // （标定线程注入运动帧，物理鼠标不参与），与 C 桥 compute_aiming 语义一致。
+                injection_allowed = frame_profile->mouse.calibrating ||
+                                    (frame_profile->mouse.enabled &&
+                                    (frame_profile->mouse.aim_hotkey_mode == 1 ? (a && b) : (a || b)));
             }
             AimStateEvent event; event.has_target = selected.valid;
             event.hotkey_active = injection_allowed;
@@ -176,25 +209,22 @@ void AimThread::loop() {
                 pred_ey = pred_ty - ref_y;
                 float control_x = (prediction_time_s_ > 0.0f) ? pred_ex : (smooth_tx - ref_x);
                 float control_y = (prediction_time_s_ > 0.0f) ? pred_ey : (smooth_ty - ref_y);
-                if (runtime_config_) {
-                    auto profile = runtime_config_->snapshot();
-                    if (profile) {
-                        // 自动标定偏置进入同一控制误差域，复用正式 PID/输出链测量响应。
-                        if (profile->mouse.calibrating) {
-                            control_x += profile->mouse.calibration_bias_x;
-                            control_y += profile->mouse.calibration_bias_y;
-                        }
-                        if (profile->mouse.fov_mode) {
+                if (frame_profile) {
+                    // 自动标定偏置进入同一控制误差域，复用正式 PID/输出链测量响应。
+                    if (frame_profile->mouse.calibrating) {
+                        control_x += frame_profile->mouse.calibration_bias_x;
+                        control_y += frame_profile->mouse.calibration_bias_y;
+                    }
+                    if (frame_profile->mouse.fov_mode) {
                         // FOV 模式：像素误差 → 角度 → HID count（fov_move 输出已是最终移动量）。
                         // 修复点：此前把 count 域输出替换 control_x 再进 PID（kp=25×count）双重缩放。
                         // 现在 control_x 保持像素域（个人曲线/拉枪距离判定需要像素域），
                         // fov 输出存入 fov_out，在 PID 调用处直接旁路（见 L191-193）。
                         fov_out_x = fov_move_x(ex, static_cast<float>(task.frame_width),
-                                               profile->mouse.hfov, profile->mouse.move_speed_x);
+                                               frame_profile->mouse.hfov, frame_profile->mouse.move_speed_x);
                         fov_out_y = fov_move_y(ey, static_cast<float>(task.frame_height),
-                                               profile->mouse.vfov, profile->mouse.move_speed_y);
+                                               frame_profile->mouse.vfov, frame_profile->mouse.move_speed_y);
                         fov_mode_active = true;
-                        }
                     }
                 }
                 const float dt = previous_timestamp_us > 0 && task.timestamp_us > previous_timestamp_us
@@ -219,7 +249,7 @@ void AimThread::loop() {
                 scaled_y = aibox_y * out_gain;
                 // 个人曲线只改变输出倍率，不绕过 PID、死区和热键安全门。
                 const float personal_distance = std::hypot(control_x, control_y);
-                const float personal_gain = PersonalMotion{}.scale(personal_distance, personal_motion);
+                const float personal_gain = PersonalMotion::scale(personal_distance, personal_motion);
                 scaled_x *= personal_gain;
                 scaled_y *= personal_gain;
                 // 拉枪曲线：目标误差 ≥ min_distance 时，在拉枪方向附加弧线/抖动（Y 轴附加量）。

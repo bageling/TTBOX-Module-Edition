@@ -9,7 +9,9 @@
 #pragma once
 
 #include <atomic>
+#include <condition_variable>
 #include <functional>
+#include <mutex>
 #include <string>
 #include <vector>
 #include <thread>
@@ -94,6 +96,10 @@ public:
     void set_model_activate_handler(ModelActionHandler h) { model_activate_ = std::move(h); }
     void set_model_remove_handler(ModelActionHandler h) { model_remove_ = std::move(h); }
 
+    // 模型并发设置回调（MODEL_SET_CONCURRENCY）：按 model_id 写 manifest worker_cores。
+    using ModelConcurrencyHandler = std::function<bool(const std::string& model_id, int count, std::string* error)>;
+    void set_model_concurrency_handler(ModelConcurrencyHandler h) { model_concurrency_ = std::move(h); }
+
 private:
     void accept_loop();
     void handle_connection(int fd);
@@ -101,6 +107,17 @@ private:
 
     std::string socket_path_;
     int listen_fd_ = -1;
+    // Preview 是较大的 base64 响应，浏览器刷新、状态轮询和配置读取会短时重叠。
+    // 8 个连接会把正常 Web 并发误判为过载并直接断开；32 仍是明确硬上限，
+    // 同时覆盖实际产品并发峰值。
+    static constexpr int kMaxConnections = 32;
+    std::atomic<int> active_connections_{0};
+    // 在途连接 fd 跟踪：stop() 需要 shutdown 这些 fd 唤醒卡在 read_line 的
+    // detached 线程，并排空 active_connections_ 后再析构，否则连接线程在对象
+    // 销毁后仍访问 this（handler/计数器）→ use-after-free 崩溃（竞态，位置随机）。
+    std::mutex conn_fds_mutex_;
+    std::condition_variable conn_fds_cv_;
+    std::vector<int> conn_fds_;
     std::atomic<bool> running_{false};
     std::thread accept_thread_;
     StatusProvider status_provider_;
@@ -114,6 +131,7 @@ private:
     ModelActionHandler model_install_;
     ModelActionHandler model_activate_;
     ModelActionHandler model_remove_;
+    ModelConcurrencyHandler model_concurrency_;
 };
 
 // 同步请求客户端：发送一行 JSON 请求，读取一行 JSON 响应。

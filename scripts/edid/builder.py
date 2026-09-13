@@ -78,7 +78,7 @@ def _monitor_name_dtd(name: str) -> bytes:
     """显示器名称 DTD (0xFC)，对齐 YU：名称 + \n + 2 空格填满 13 字节。"""
     buf = bytearray(18)
     buf[3] = 0xFC
-    text = (name[:10].ljust(10) + '\n  ').encode('ascii', 'replace')
+    text = (name[:12].ljust(12) + '\n').encode('ascii', 'replace')
     buf[5:18] = text[:13]  # 13 字节内容填满（含尾部），byte17 不再覆盖
     return bytes(buf)
 
@@ -92,7 +92,9 @@ def _serial_dtd(serial_text: str) -> bytes:
     return bytes(buf)
 
 
-def _range_limits_dtd_yu(min_v: int = 143, max_v: int = 146) -> bytes:
+def _range_limits_dtd_yu(min_v: int = 239, max_v: int = 241,
+                         min_h: int = 254, max_h: int = 255,
+                         max_clock_mhz: int = 600) -> bytes:
     """频率范围 DTD (0xFD)，逐字节对齐 YU 1440p144 成功版：
     00 00 00 fd 00 8f 92 d6 d9 3b 00 ...（byte10=0x00）
     minV=0x8f(143) maxV=0x92(146) minH=0xd6(214) maxH=0xd9(217)
@@ -103,16 +105,32 @@ def _range_limits_dtd_yu(min_v: int = 143, max_v: int = 146) -> bytes:
     buf[4] = 0x00
     buf[5] = min_v & 0xFF
     buf[6] = max_v & 0xFF
-    buf[7] = 214     # min horizontal kHz
-    buf[8] = 217     # max horizontal kHz
-    buf[9] = 59      # max pixel clock / 10MHz (590MHz)
+    buf[7] = min_h & 0xFF
+    buf[8] = max_h & 0xFF
+    # EDID 以 10MHz 为单位，不能向下取整，否则 594MHz 会被声明成 590MHz，
+    # 部分源端会因此拒绝 1080p240/1440p144。
+    buf[9] = max(1, min(255, (int(max_clock_mhz) + 9) // 10))
     buf[10] = 0x0A   # 扩展标志（对齐 YU = 0x0A）
     return bytes(buf)
 
 
 def _range_limits_dtd(max_clock_mhz: int) -> bytes:
-    """兼容旧签名：默认走 YU 格式。"""
-    return _range_limits_dtd_yu()
+    """根据最高广播时序生成 Range Limits，匹配 YU 的高刷能力声明。"""
+    max_clock_mhz = max(25, min(600, int(max_clock_mhz or 600)))
+    max_t = max((t for t in TIMING_MAP.values()
+                 if int(round(t.pixel_clock)) <= max_clock_mhz),
+               key=lambda t: t.refresh, default=None)
+    refresh = int(round(max_t.refresh)) if max_t else 240
+    min_v = max(24, min(239, refresh - 1))
+    max_v = min(255, max(refresh + 1, min_v + 2))
+    # YU/RK3588 高刷 EDID 使用 254-255kHz 的安全范围，避免源端把
+    # 过大的计算值当成非法水平频率而退回 DVI。
+    if refresh >= 200:
+        min_h, max_h = 254, 255
+    else:
+        min_h = max(24, min(254, int((max_t.h_total * refresh) / 1000) - 1)) if max_t else 24
+        max_h = min(255, max(min_h + 1, min_h + 2))
+    return _range_limits_dtd_yu(min_v, max_v, min_h, max_h, max_clock_mhz)
 
 
 def yu_established() -> bytes:
@@ -142,8 +160,9 @@ def _hdmi_vsdb(max_tmds_mhz: int = 600) -> bytes:
     #   byte7=0x76 → bit6/5/2 = HDMI_2_0 声明（586MHz 需要）
     # VSDB2 (8B): 67 d8 5d c4 01 76 80 00
     #   tag=3 len=7 | HF-VSDB 数据 d8 5d c4(=0xC45DD8 LSB 前缀) | 01 | 76(=592→600MHz?) | 80 | 00
-    vsdb14 = bytes([0x67, 0x03, 0x0C, 0x00, 0x10, 0x00, 0x00, 0x76])
-    hf = bytes([0x67, 0xD8, 0x5D, 0xC4, 0x01, 0x76, 0x80, 0x00])
+    # YU 实机成功样本使用 0x77，表示 SCDC/高带宽能力；0x76 会让部分源端退回 DVI。
+    vsdb14 = bytes([0x67, 0x03, 0x0C, 0x00, 0x10, 0x00, 0x00, 0x77])
+    hf = bytes([0x67, 0xD8, 0x5D, 0xC4, 0x01, 0x77, 0x80, 0x00])
     return vsdb14 + hf
 
 

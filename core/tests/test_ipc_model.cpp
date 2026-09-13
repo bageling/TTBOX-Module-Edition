@@ -1,6 +1,7 @@
 // test_ipc_model.cpp — v0.3 模型管理 IPC 验收：
 // MODEL_LIST / MODEL_IMPORT / MODEL_VALIDATE / MODEL_INSTALL / MODEL_ACTIVATE / MODEL_REMOVE
 // 附带：model_id 非法字符拒绝（path traversal 防护）、收件目录约束、active 跟随。
+#include <atomic>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -47,22 +48,21 @@ static JsonValue ipc_error_response(const std::string& err) {
     return j;
 }
 
+// 每实例唯一的临时目录标识：组合 PID、单调时钟和进程内序号。
+// 仅 PID+序号仍会在 Windows 复用 PID、新进程序号重置时撞上旧残留目录。
+static std::string unique_instance_id() {
+    static std::atomic<int> seq{0};
+    const auto tick = std::chrono::steady_clock::now().time_since_epoch().count();
+    return std::to_string(::getpid()) + "_" + std::to_string(tick) + "_" +
+           std::to_string(seq.fetch_add(1, std::memory_order_relaxed));
+}
+
 std::string tmp_socket() {
 #if defined(_WIN32)
-    return "tcp:39131";
+    return "tcp:0";  // 临时端口：OS 分配唯一端口（见 test_ipc.cpp 同注释）
 #else
     return "/tmp/ttbox_ipc_model_" + std::to_string(static_cast<long>(::getpid())) + ".sock";
 #endif
-}
-
-
-// Windows TIME_WAIT 下固定端口偶发 bind 失败：带重试的启动（总等待 ~1s）
-static bool start_with_retry(ttbox::core::IpcServer& server, std::string* error = nullptr) {
-    for (int attempt = 0; attempt < 5; ++attempt) {
-        if (server.start(tmp_socket(), error)) return true;
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    }
-    return false;
 }
 
 struct ModelFixture {
@@ -71,7 +71,7 @@ struct ModelFixture {
     IpcServer server;
 
     explicit ModelFixture(bool with_validator = true)
-        : root((fs::temp_directory_path() / ("ttbox_ipc_model_" + std::to_string(::getpid()))).string()),
+        : root((fs::temp_directory_path() / ("ttbox_ipc_model_" + unique_instance_id())).string()),
           mm(ModelRegistryOptions{root, true}) {
         std::string err;
         if (!mm.init(&err)) { std::fprintf(stderr, "init failed: %s\n", err.c_str()); std::abort(); }
@@ -213,8 +213,6 @@ TEST(model_ipc_full_lifecycle) {
         r = fx.ipc("MODEL_INSTALL", R"({"model_id":"yolo-face-v1"})");
     }
     CHECK_EQ(resp_status(r), 0);
-
-    // 5) list 出现且 active 为空
     r = fx.ipc("MODEL_LIST");
     CHECK_EQ(resp_status(r), 0);
     {

@@ -74,6 +74,8 @@ private:
 
     std::vector<DetectionBox> smooth_prev_;
     uint64_t smooth_lost_count_ = 0;
+    // 预览线程独占，按尺寸复用，避免每帧重复申请 640×640×3 临时缓冲。
+    std::vector<uint8_t> crop_buffer_;
 
     mutable std::mutex jpeg_mutex_;
     std::vector<uint8_t> jpeg_;

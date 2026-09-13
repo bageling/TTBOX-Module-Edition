@@ -253,44 +253,67 @@ int send_data(uint8_t endpoint, uint8_t attributes, uint8_t *dataptr,
 	int transferred;
 	int attempt = 0;
 	int result = LIBUSB_SUCCESS;
+	int sent = 0;
 
 	bool incomplete_transfer = false;
+	bool tracked = false;
 
 	switch (attributes & USB_ENDPOINT_XFERTYPE_MASK) {
 	case USB_ENDPOINT_XFER_CONTROL:
 		fprintf(stderr, "Can't send on a control endpoint.\n");
 		break;
 	case USB_ENDPOINT_XFER_BULK:
+		tracked = true;
 		do {
-			result = libusb_bulk_transfer(dev_handle, endpoint, dataptr, length, &transferred, timeout);
-			//TODO retry transfer if incomplete
-			if (transferred != length) {
+			transferred = 0;
+			result = libusb_bulk_transfer(dev_handle, endpoint, dataptr + sent,
+							  length - sent, &transferred, timeout);
+			if (transferred > 0)
+				sent += transferred;
+			if (sent != length) {
 				fprintf(stderr, "Incomplete Bulk transfer on EP%02x for attempt %d. length(%d), transferred(%d)\n",
-					endpoint, attempt, length, transferred);
+					endpoint, attempt, length, sent);
 				incomplete_transfer = true;
 			}
 			if (result == LIBUSB_SUCCESS) {
 				if (incomplete_transfer)
 					printf("Resent Bulk transfer on EP%02x for attempt %d. length(%d), transferred(%d)\n",
-						endpoint, attempt, length, transferred);
+						endpoint, attempt, length, sent);
 				if (verbose_level > 2)
-					printf("Sent %d bytes (Bulk) to EP%02x\n", transferred, endpoint);
+					printf("Sent %d bytes (Bulk) to EP%02x\n", sent, endpoint);
 			}
 			if ((result == LIBUSB_ERROR_PIPE || result == LIBUSB_ERROR_TIMEOUT))
 				libusb_clear_halt(dev_handle, endpoint);
 
 			attempt++;
-		} while ((result == LIBUSB_ERROR_PIPE || result == LIBUSB_ERROR_TIMEOUT || transferred != length)
+		} while ((result == LIBUSB_ERROR_PIPE || result == LIBUSB_ERROR_TIMEOUT || sent != length)
 					&& attempt < MAX_ATTEMPTS);
 		break;
 	case USB_ENDPOINT_XFER_INT:
-		result = libusb_interrupt_transfer(dev_handle, endpoint, dataptr, length, &transferred, timeout);
+		tracked = true;
+		do {
+			transferred = 0;
+			result = libusb_interrupt_transfer(dev_handle, endpoint, dataptr + sent,
+								  length - sent, &transferred, timeout);
+			if (transferred > 0)
+				sent += transferred;
 
-		if (transferred != length)
-			fprintf(stderr, "Incomplete Interrupt transfer on EP%02x\n", endpoint);
-		if (result == LIBUSB_SUCCESS && verbose_level > 2)
-			printf("Sent %d bytes (Int) to libusb EP%02x\n", transferred, endpoint);
+			if (sent != length)
+				fprintf(stderr, "Incomplete Interrupt transfer on EP%02x\n", endpoint);
+			if (result == LIBUSB_SUCCESS && verbose_level > 2)
+				printf("Sent %d bytes (Int) to libusb EP%02x\n", sent, endpoint);
+			if ((result == LIBUSB_ERROR_PIPE || result == LIBUSB_ERROR_TIMEOUT))
+				libusb_clear_halt(dev_handle, endpoint);
+			attempt++;
+		} while ((result == LIBUSB_ERROR_PIPE || result == LIBUSB_ERROR_TIMEOUT || sent != length)
+					&& attempt < MAX_ATTEMPTS);
 		break;
+	}
+	if (tracked && sent != length) {
+		fprintf(stderr,
+			"Incomplete transfer on EP%02x after %d attempts: %d/%d bytes sent\n",
+			endpoint, attempt, sent, length);
+		return result == LIBUSB_SUCCESS ? LIBUSB_ERROR_OTHER : result;
 	}
 	if (result != LIBUSB_SUCCESS) {
 		fprintf(stderr, "Transfer error sending on EP%02x: %s\n",

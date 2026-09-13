@@ -229,6 +229,7 @@ JsonValue ModelManifest::to_json() const {
     for (const auto& n : class_names) jnames.push_back(JsonValue::string(n));
     root.set("class_names", std::move(jnames));
     root.set("rknn_concurrency", JsonValue::number(static_cast<double>(rknn_concurrency)));
+    root.set("worker_cores", JsonValue::string(worker_cores));
     root.set("status", JsonValue::number(static_cast<double>(static_cast<int>(status))));
     root.set("status_name", JsonValue::string(model_status_name(status)));
     root.set("created_at", JsonValue::number(static_cast<double>(created_at)));
@@ -296,6 +297,7 @@ ModelManifest ModelManifest::from_json(const JsonValue& v) {
     m.class_count = get_int_fn("class_count");
     m.rknn_concurrency = get_int_fn("rknn_concurrency");
     if (m.rknn_concurrency == 0) m.rknn_concurrency = 1;
+    m.worker_cores = get("worker_cores", "");
     if (const JsonValue* jn = v.find("class_names"); jn && jn->is_array()) {
         for (const auto& e : jn->as_array()) if (e.is_string()) m.class_names.push_back(e.as_string());
     }
@@ -393,10 +395,15 @@ std::string ModelRegistry::installed_dir(const std::string& model_id) const {
 }
 
 std::string ModelRegistry::model_dir_locked(const std::string& model_id) const {
-    const std::string final_dir = root_ + "/" + model_id;
     std::error_code ec;
-    if (fs::is_directory(final_dir, ec)) return final_dir;
-    return installed_dir(model_id);
+    // 正式 installed 目录优先于根目录兼容布局；否则同 ID 的旧目录会
+    // 遮蔽已安装模型，导致 list 显示 A、activate/remove 实际操作 B。
+    const std::string installed = installed_dir(model_id);
+    if (fs::is_directory(installed, ec)) return installed;
+    ec.clear();
+    const std::string legacy = root_ + "/" + model_id;
+    if (fs::is_directory(legacy, ec)) return legacy;
+    return installed;
 }
 
 std::string ModelRegistry::rknn_path(const std::string& model_id) const {
@@ -476,6 +483,10 @@ bool ModelRegistry::validate(const std::string& model_id, std::string* error) {
         if (error) *error = "CHECKSUM_MISMATCH";
         return false;
     }
+    // 每次验证开始先作废旧凭证。否则本次真实加载失败后，历史 ok.json 仍可能
+    // 被 install 当作当前 PASS，形成“验证失败但仍可入库”的状态穿透。
+    std::error_code stale_ec;
+    fs::remove_all(dir + "/validation", stale_ec);
     JsonValue metadata;
     std::string verr;
     if (!validator_(rknn, &metadata, &verr)) {
@@ -507,8 +518,7 @@ bool ModelRegistry::validate(const std::string& model_id, std::string* error) {
     vroot.set("metadata", metadata);
     std::error_code vec;
     fs::create_directories(dir + "/validation", vec);
-    if (vec || !write_file_atomic(dir + "/validation/ok.json", vroot.dump()) ||
-        !write_file_atomic(dir + "/validation/metadata.json", metadata.dump())) {
+    if (vec) {
         if (error) *error = "VALIDATION_REPORT_WRITE_FAILED";
         return false;
     }
@@ -521,7 +531,48 @@ bool ModelRegistry::validate(const std::string& model_id, std::string* error) {
     // 只有 install 成功搬到 installed/ 后才写 kInstalled。
     manifest.status = ModelStatus::kStaging;
     manifest.updated_at = std::stoll(now_ms());
-    if (!write_file_atomic(dir + "/manifest.json", manifest.to_json().dump())) {
+    // 验证事务提交顺序：先落 manifest/metadata，最后才创建 ok.json。
+    // ok.json 是 install 唯一 PASS 标志，因此任何前置写入失败都不会留下假成功。
+    if (!write_file_atomic(dir + "/manifest.json", manifest.to_json().dump()) ||
+        !write_file_atomic(dir + "/validation/metadata.json", metadata.dump()) ||
+        !write_file_atomic(dir + "/validation/ok.json", vroot.dump())) {
+        std::error_code cleanup_ec;
+        fs::remove(dir + "/validation/ok.json", cleanup_ec);
+        if (error) *error = "VALIDATION_REPORT_WRITE_FAILED";
+        return false;
+    }
+    refresh_locked(nullptr);
+    return true;
+}
+
+bool ModelRegistry::set_concurrency(const std::string& model_id, int count, std::string* error) {
+    if (count < 1 || count > 3) {
+        if (error) *error = "CONCURRENCY_INVALID: 仅支持 1~3";
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!valid_model_id(model_id)) {
+        if (error) *error = "MODEL_ID_INVALID";
+        return false;
+    }
+    const std::string mpath = manifest_path(model_id);
+    std::string text;
+    if (!read_file(mpath, &text)) {
+        if (error) *error = "MANIFEST_MISSING: " + model_id;
+        return false;
+    }
+    const auto parsed = json_parse(text);
+    if (!parsed.ok || !parsed.value.is_object()) {
+        if (error) *error = "MANIFEST_INVALID: " + model_id;
+        return false;
+    }
+    ModelManifest m = ModelManifest::from_json(parsed.value);
+    m.rknn_concurrency = static_cast<uint32_t>(count);
+    if (count == 1) m.worker_cores = "1";
+    else if (count == 2) m.worker_cores = "1,2";
+    else m.worker_cores = "1,2,4";
+    m.updated_at = std::stoll(now_ms());
+    if (!write_file_atomic(mpath, m.to_json().dump())) {
         if (error) *error = "MANIFEST_WRITE_FAILED";
         return false;
     }
@@ -533,6 +584,8 @@ bool ModelRegistry::install(const std::string& model_id, std::string* error) {
     std::lock_guard<std::mutex> lock(mutex_);
     const std::string sd = staging_dir(model_id);
     const std::string id = installed_dir(model_id);
+    const std::string install_tmp =
+        root_ + "/cache/.installing_" + model_id + "_" + now_ms();
     if (!exists(sd + "/model.rknn")) {
         if (error) *error = "staging 模型不存在（先 import+validate）: " + model_id;
         return false;
@@ -541,8 +594,61 @@ bool ModelRegistry::install(const std::string& model_id, std::string* error) {
         if (error) *error = "模型未验证（先 validate）: " + model_id;
         return false;
     }
+    // validation/ok.json 必须属于“当前这份”模型。旧实现只检查文件存在：
+    // validate 后若 model.rknn 被替换/损坏，旧 PASS 仍可把变更后的模型装入正式库。
+    // 这里重新计算模型 SHA，并同时核对 manifest 与验证凭证，三者必须完全一致。
+    std::string staging_manifest_text;
+    std::string validation_text;
+    std::string actual_sha;
+    if (!read_file(sd + "/manifest.json", &staging_manifest_text)) {
+        if (error) *error = "MANIFEST_MISSING";
+        return false;
+    }
+    if (!read_file(sd + "/validation/ok.json", &validation_text)) {
+        if (error) *error = "VALIDATION_REPORT_MISSING";
+        return false;
+    }
+    const auto staging_manifest_parsed = json_parse(staging_manifest_text);
+    const auto validation_parsed = json_parse(validation_text);
+    if (!staging_manifest_parsed.ok || !staging_manifest_parsed.value.is_object() ||
+        !validation_parsed.ok || !validation_parsed.value.is_object()) {
+        if (error) *error = "VALIDATION_REPORT_INVALID";
+        return false;
+    }
+    if (!sha256_file(sd + "/model.rknn", &actual_sha, error)) return false;
+    const ModelManifest validated_manifest =
+        ModelManifest::from_json(staging_manifest_parsed.value);
+    const JsonValue* validation_ok = validation_parsed.value.find("ok");
+    const JsonValue* validation_checksum = validation_parsed.value.find("checksum");
+    if (!validation_ok || !validation_ok->as_bool(false) ||
+        !validation_checksum || !validation_checksum->is_string() ||
+        !is_hex_sha256(validated_manifest.sha256) ||
+        validated_manifest.sha256 != actual_sha ||
+        validation_checksum->as_string() != actual_sha) {
+        if (error) *error = "VALIDATION_STALE: 模型内容已变化，必须重新 validate";
+        return false;
+    }
     if (exists(id)) {
-        if (error) *error = "目标已存在（需先 remove）: " + model_id;
+        // 网络/IPC 可能在安装已完成后丢失响应，客户端随后重发同一请求。
+        // 若 installed 与 staging manifest 的 checksum 完全相同，视为同一安装事务的
+        // 幂等重放并返回成功；同 ID 不同内容仍严格拒绝，绝不静默覆盖。
+        std::string staging_manifest_text;
+        std::string installed_manifest_text;
+        if (read_file(sd + "/manifest.json", &staging_manifest_text) &&
+            read_file(id + "/manifest.json", &installed_manifest_text)) {
+            const auto staging_parsed = json_parse(staging_manifest_text);
+            const auto installed_parsed = json_parse(installed_manifest_text);
+            if (staging_parsed.ok && installed_parsed.ok) {
+                const ModelManifest staging_manifest = ModelManifest::from_json(staging_parsed.value);
+                const ModelManifest installed_manifest = ModelManifest::from_json(installed_parsed.value);
+                if (is_hex_sha256(staging_manifest.sha256) &&
+                    staging_manifest.sha256 == installed_manifest.sha256) {
+                    refresh_locked(nullptr);
+                    return true;
+                }
+            }
+        }
+        if (error) *error = "目标已存在且内容不同（需先 remove）: " + model_id;
         return false;
     }
     // 读 staging manifest → 状态改为 installed
@@ -560,20 +666,37 @@ bool ModelRegistry::install(const std::string& model_id, std::string* error) {
     m.status = ModelStatus::kInstalled;
 
     std::error_code ec;
-    fs::create_directories(id, ec);
+    fs::create_directories(install_tmp, ec);
     if (ec) {
-        if (error) *error = "创建 installed 目录失败: " + ec.message();
+        if (error) *error = "创建安装临时目录失败: " + ec.message();
         return false;
     }
-    // 复制（staging 保留；remove 时清理）
-    if (!copy_file(sd + "/model.rknn", id + "/model.rknn", error)) return false;
-    if (!copy_file(sd + "/validation/ok.json", id + "/validation/ok.json", error)) return false;
-    if (!write_file_atomic(id + "/manifest.json", m.to_json().dump())) {
-        if (error) *error = "写 installed manifest 失败";
+    // 在 cache 临时目录完整组装，再同文件系统原子 rename 到 installed/<id>。
+    // 任一步失败只清临时目录，最终目录始终只有“完整模型”或“不存在”两态；
+    // 即使进程中途崩溃，也不会留下会被误认成已安装的半成品目录。
+    bool copy_ok =
+        copy_file(sd + "/model.rknn", install_tmp + "/model.rknn", error) &&
+        copy_file(sd + "/validation/ok.json", install_tmp + "/validation/ok.json", error) &&
+        write_file_atomic(install_tmp + "/manifest.json", m.to_json().dump());
+    if (copy_ok && exists(sd + "/validation/metadata.json")) {
+        copy_ok = copy_file(sd + "/validation/metadata.json",
+                            install_tmp + "/metadata.json", error);
+    }
+    if (!copy_ok) {
+        if (!error || error->empty()) {
+            if (error) *error = "install 复制/写入失败";
+        }
+        std::error_code rm_ec;
+        fs::remove_all(install_tmp, rm_ec);
         return false;
     }
-    if (exists(sd + "/validation/metadata.json")) {
-        if (!copy_file(sd + "/validation/metadata.json", id + "/metadata.json", error)) return false;
+    ec.clear();
+    fs::rename(install_tmp, id, ec);
+    if (ec) {
+        if (error) *error = "发布 installed 模型失败: " + ec.message();
+        std::error_code rm_ec;
+        fs::remove_all(install_tmp, rm_ec);
+        return false;
     }
     refresh_locked(nullptr);
     return true;
@@ -639,8 +762,25 @@ bool ModelRegistry::activate(const std::string& model_id, std::string* error) {
         if (error) *error = "MODEL_NOT_FOUND";
         return false;
     }
+    // 激活前先过完整模型包门槛：manifest/schema/checksum/metadata 任一无效都不得
+    // 仅凭 RKNN 文件“能加载”就写入 active.json。
+    ModelRecord record;
+    if (!build_record_locked(model_dir, model_id, &record) ||
+        (record.status != ModelStatus::kReady &&
+         record.status != ModelStatus::kSelected &&
+         record.status != ModelStatus::kRunning)) {
+        if (error) {
+            *error = "MODEL_NOT_READY: " +
+                     (record.failure_code.empty() ? std::string("模型包未通过注册校验")
+                                                  : record.failure_code + ": " + record.failure_message);
+        }
+        return false;
+    }
     const std::string old = read_active();
-    // 激活前校验"可用"：validator 加载 installed 模型
+    // 激活前校验"可用"：validator 真实加载 installed 模型
+    // 激活前必须用 validator 真实加载 installed 模型：staging 校验凭证被
+    // 复制到 installed 后，不能仅凭 metadata 存在就跳过激活校验，否则
+    // “安装后被替换/损坏但仍带旧凭证”的模型也会被激活成功。
     if (validator_) {
         JsonValue metadata;
         std::string verr;
@@ -648,9 +788,11 @@ bool ModelRegistry::activate(const std::string& model_id, std::string* error) {
             if (error) *error = "激活校验失败，保持原激活(" + old + "): " + verr;
             return false;  // 未修改 active —— 自动恢复旧模型
         }
-        // 同步 metadata 到 installed（激活时刷新）
-        if (!metadata.is_null()) {
-            write_file_atomic(metadata_path(model_id), metadata.dump());
+        // 同步 metadata 到 installed（激活时刷新）；写回失败意味着注册状态无法
+        // 与本次真实加载结果保持一致，激活事务必须失败且 active 不变。
+        if (!metadata.is_null() && !write_file_atomic(metadata_path(model_id), metadata.dump())) {
+            if (error) *error = "METADATA_WRITE_FAILED: 激活校验结果无法落盘，保持原激活(" + old + ")";
+            return false;
         }
     }
     if (!write_active(model_id, error)) {
@@ -823,8 +965,8 @@ bool ModelRegistry::scan_locked(std::vector<ModelRecord>* out, std::string* erro
             if (ec || !entry.is_directory()) continue;
             const std::string id = entry.path().filename().string();
             if (!valid_model_id(id)) continue;
-            if (!legacy && (id == "registry" || id == "installed" || id == "staging" ||
-                            id == "cache" || id == "quarantine" || id == "_incoming")) continue;
+            if (parent == root_ && (id == "registry" || id == "installed" || id == "staging" ||
+                                    id == "cache" || id == "quarantine" || id == "_incoming")) continue;
             if (!ids.insert(id).second) continue;
             ModelRecord record;
             build_record_locked(entry.path().string(), id, &record);
@@ -836,13 +978,15 @@ bool ModelRegistry::scan_locked(std::vector<ModelRecord>* out, std::string* erro
             }
             if (legacy && record.failure_code.empty() && record.status == ModelStatus::kReady) {
                 record.failure_code = "LEGACY_LAYOUT";
-                record.failure_message = "模型仍位于兼容目录 installed/";
+                record.failure_message = "模型仍位于 models/ 根目录兼容布局";
             }
             out->push_back(std::move(record));
         }
     };
-    scan_dir(root_, false, ModelStatus::kUnknown);
-    scan_dir(root_ + "/installed", true, ModelStatus::kUnknown);
+    // 正式模型目录是 installed/<id>，不能误标为 LEGACY_LAYOUT。
+    // 根目录直放模型才是旧兼容布局；先扫描正式目录，避免同 ID 的旧目录遮蔽正式模型。
+    scan_dir(root_ + "/installed", false, ModelStatus::kUnknown);
+    scan_dir(root_, true, ModelStatus::kUnknown);
     scan_dir(root_ + "/staging", false, ModelStatus::kStaging);
     std::sort(out->begin(), out->end(), [](const ModelRecord& a, const ModelRecord& b) {
         return a.model_id < b.model_id;

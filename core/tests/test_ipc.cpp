@@ -1,4 +1,5 @@
 // test_ipc.cpp — IPC 服务端：PING / GET_STATUS / GET_CONFIG / 错误处理
+#include <atomic>
 #include <chrono>
 #include <string>
 #include <thread>
@@ -16,7 +17,8 @@ namespace {
 
 std::string tmp_socket_path() {
 #if defined(_WIN32)
-    return "tcp:39128";
+    return "tcp:0";  // 临时端口：OS 分配唯一端口，start() 后从 socket_path() 读回，
+                     // 彻底消除多用例共用固定端口的 TIME_WAIT 竞态
 #else
     return "/tmp/ttbox_core_test_" + std::to_string(static_cast<long>(::getpid())) + ".sock";
 #endif
@@ -39,6 +41,8 @@ ttbox::core::SystemStatus test_status() {
     st.uptime_ms = 12.5;
     st.ipc_socket = "test.sock";
     st.config_file = "test.json";
+    st.metrics.last_frame = 42;
+    st.metrics.last_timestamp_us = 1789000000123456ULL;
     return st;
 }
 
@@ -97,6 +101,14 @@ TEST(ipc_get_status) {
             CHECK(running_v != nullptr && running_v->as_bool() == true);
             const auto* version_v = data_v->find("version");
             CHECK(version_v != nullptr && version_v->as_string() == "0.0.0");
+            const auto* metrics_v = data_v->find("metrics");
+            CHECK(metrics_v != nullptr);
+            if (metrics_v != nullptr) {
+                const auto* last_frame_v = metrics_v->find("last_frame");
+                CHECK(last_frame_v != nullptr && last_frame_v->as_int() == 42);
+                const auto* last_ts_v = metrics_v->find("last_timestamp_us");
+                CHECK(last_ts_v != nullptr && last_ts_v->as_int() == 1789000000123456LL);
+            }
         }
     }
     server.stop();
@@ -157,6 +169,37 @@ TEST(ipc_bad_json_error) {
         CHECK(status_v != nullptr && status_v->as_int() == 1);
     }
     server.stop();
+}
+
+TEST(ipc_stop_drains_inflight_connections) {
+    // 回归：旧实现使用 detached 连接线程，但 stop() 只 join accept 线程。
+    // 对象析构后连接线程继续访问 handler/active_connections_，会随机 UAF 崩溃。
+    for (int round = 0; round < 30; ++round) {
+        ttbox::core::IpcServer server;
+        std::atomic<bool> handler_entered{false};
+        server.set_status_provider([&handler_entered] {
+            handler_entered.store(true, std::memory_order_release);
+            std::this_thread::sleep_for(std::chrono::milliseconds(3));
+            return test_status();
+        });
+        std::string error;
+        CHECK(start_with_retry(server, &error));
+        if (!server.running()) return;
+
+        const std::string path = server.socket_path();
+        std::thread client([path] {
+            std::string response;
+            std::string error;
+            ttbox::core::ipc_request(path, R"({"type":"GET_STATUS"})", response, 1000, &error);
+        });
+        for (int spin = 0; spin < 100 && !handler_entered.load(std::memory_order_acquire); ++spin) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        CHECK(handler_entered.load(std::memory_order_acquire));
+        server.stop();  // 必须等连接线程彻底退出后才返回
+        client.join();
+        CHECK(!server.running());
+    }
 }
 
 TEST(ipc_client_connection_refused) {

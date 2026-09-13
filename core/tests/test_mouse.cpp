@@ -371,6 +371,49 @@ TEST(mouse_aim_state_hotkey_release) {
     CHECK(sm.state() == aim::AimState::kIdle);
 }
 
+TEST(mouse_aim_state_reset_clears_lock_and_confirmation) {
+    aim::AimStateMachine sm;
+    aim::LockConfirmConfig cfg;
+    cfg.confirmation_frames = 1;
+    cfg.enter_conf = 0.8f;
+    cfg.hold_conf = 0.2f;
+    cfg.instant_enter_enabled = false;
+
+    aim::AimStateEvent ev;
+    ev.hotkey_active = true;
+    ev.has_target = true;
+    ev.now_ms = 1000;
+    ev.target_confidence = 0.9f;
+    CHECK(sm.update(ev, 78.0f, cfg));
+    CHECK(sm.state() == aim::AimState::kAiming);
+
+    sm.reset();
+    CHECK(sm.state() == aim::AimState::kIdle);
+    // reset 后不能沿用旧 HOLD 阈值；低于 enter_conf 的新世代首帧必须留在 selecting。
+    ev.now_ms = 2000;
+    ev.target_confidence = 0.3f;
+    CHECK(!sm.update(ev, 78.0f, cfg));
+    CHECK(sm.state() == aim::AimState::kSelecting);
+}
+
+TEST(mouse_target_selector_reset_restarts_track_identity) {
+    aim::TargetSelector selector;
+    aim::TargetSelectorConfig cfg;
+    cfg.roi_w = 320;
+    cfg.roi_h = 320;
+    cfg.confidence = 0.1f;
+    DetectionBox box;
+    box.x1 = 140; box.y1 = 120; box.x2 = 180; box.y2 = 200;
+    box.score = 0.9f; box.class_id = 0;
+    const auto first = selector.select({box}, cfg, 1000);
+    CHECK(first.valid);
+    CHECK_EQ(first.target_id, 1);
+    selector.reset();
+    const auto next_generation = selector.select({box}, cfg, 2000);
+    CHECK(next_generation.valid);
+    CHECK_EQ(next_generation.target_id, 1);
+}
+
 // ---------------------------------------------------------------------------
 // 10. RuntimeProfile mouse 段序列化/反序列化
 // ---------------------------------------------------------------------------

@@ -59,6 +59,23 @@ bool CaptureProfile::valid(uint32_t frame_w, uint32_t frame_h,
 // ---------------------------------------------------------------------------
 namespace {
 
+// ---------------------------------------------------------------------------
+// capture ROI 合法范围（fail-closed 防线）
+//   背景：前端把"0=全帧/未知"误钳成 1，产生 capture=1×1 的退化配置，
+//   会让 AI ROI 缩成 1 像素（推理停摆）+ 预览裁成 1×1（黑屏/花屏），
+//   而系统全程零报错（API 成功、服务 active）——属于"底层已死却报成功"。
+//   这里设硬下限：模型最小输入档 192，留足余量取 64；上限对齐 4K。
+//   0 = 全帧（合法）；[1, kMinCaptureRoiPx) = 退化非法区间。
+// ---------------------------------------------------------------------------
+constexpr uint32_t kMinCaptureRoiPx = 64;
+constexpr uint32_t kMaxCaptureRoiPx = 3840;
+
+// 退化值消毒：落在 [1, kMinCaptureRoiPx) 的非法小值纠正为 0（全帧）。
+// 用于 from_json 加载历史坏配置时自愈，避免服务因一个坏字段起不来或瞎跑。
+uint32_t sanitize_capture_roi(uint32_t v) {
+    return (v > 0 && v < kMinCaptureRoiPx) ? 0u : v;
+}
+
 int64_t obj_int(const JsonValue& o, const char* key, int64_t def) {
     const JsonValue* v = o.find(key);
     return (v && v->is_number()) ? v->as_int(def) : def;
@@ -180,6 +197,18 @@ bool RuntimeProfile::validate(std::string* error) const {
     if (mouse.personal_motion.knots.size() > 32) {
         if (error) *error = "personal_motion knots 最多 32 个";
         return false;
+    }
+    // capture ROI 退化值防线（fail-closed）：0=全帧合法；非零则必须落在
+    // [kMinCaptureRoiPx, kMaxCaptureRoiPx]。拦截 1×1 这类"静默摧毁流水线"的配置。
+    // 注意：此处不校验"是否超全帧"（validate 无 frame_w/h 上下文），
+    // 越界由 WorkerPool::apply_runtime_profile 的 rw<=fw/rh<=fh 守卫兜底（超界即不应用 ROI）。
+    for (const uint32_t v : {capture.width, capture.height}) {
+        if (v != 0 && (v < kMinCaptureRoiPx || v > kMaxCaptureRoiPx)) {
+            if (error) *error = "capture 截取尺寸非法: " + std::to_string(v) +
+                                "（0=全帧，或需在 " + std::to_string(kMinCaptureRoiPx) +
+                                "~" + std::to_string(kMaxCaptureRoiPx) + " 之间）";
+            return false;
+        }
     }
     if (preview.width == 0 || preview.height == 0 ||
         preview.width > 3840 || preview.height > 2160 ||
@@ -377,8 +406,12 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
     p.model_id = obj_str(v, "model_id", "");
 
     if (const JsonValue* c = v.find("capture"); c && c->is_object()) {
-        p.capture.width = static_cast<uint32_t>(std::max<int64_t>(obj_int(*c, "width", 0), 0));
-        p.capture.height = static_cast<uint32_t>(std::max<int64_t>(obj_int(*c, "height", 0), 0));
+        // 退化值自愈：历史坏配置（如前端把 0 钳成 1 产生的 1×1）加载时纠正为 0=全帧，
+        // 保证 Core 重启不会因一个坏字段而瞎跑（AI ROI 1px=推理停摆）或起不来。
+        p.capture.width = sanitize_capture_roi(
+            static_cast<uint32_t>(std::max<int64_t>(obj_int(*c, "width", 0), 0)));
+        p.capture.height = sanitize_capture_roi(
+            static_cast<uint32_t>(std::max<int64_t>(obj_int(*c, "height", 0), 0)));
         // offset 相对屏幕中心，允许负值
         p.capture.offset_x = static_cast<int32_t>(std::max<int64_t>(-100000, std::min<int64_t>(obj_int(*c, "offset_x", 0), 100000)));
         p.capture.offset_y = static_cast<int32_t>(std::max<int64_t>(-100000, std::min<int64_t>(obj_int(*c, "offset_y", 0), 100000)));

@@ -154,6 +154,49 @@ TEST(runtime_profile_validate_rejects_nonfinite) {
     CHECK(!p.validate(&err));
 }
 
+TEST(runtime_profile_validate_rejects_degenerate_capture) {
+    // 事故回归（2026-09-10）：capture=1×1 退化配置曾静默摧毁整条流水线
+    // （AI ROI 缩成 1 像素 → 推理停摆；预览裁成 1×1），且 validate 全程放行。
+    // 现在必须 fail-closed 拒绝；0=全帧仍然合法；from_json 对历史坏值自愈为 0。
+    std::string err;
+
+    RuntimeProfile ok_full;  // 0×0 = 全帧，合法
+    CHECK(ok_full.validate(&err));
+
+    RuntimeProfile ok_640;
+    ok_640.capture.width = 640;
+    ok_640.capture.height = 640;
+    CHECK(ok_640.validate(&err));
+
+    RuntimeProfile bad_1x1;  // 事故值：1×1 必须被拒绝
+    bad_1x1.capture.width = 1;
+    bad_1x1.capture.height = 1;
+    CHECK(!bad_1x1.validate(&err));
+    CHECK(err.find("capture") != std::string::npos);
+
+    RuntimeProfile bad_small;  // 63×63：低于硬下限 64，拒绝
+    bad_small.capture.width = 63;
+    bad_small.capture.height = 63;
+    CHECK(!bad_small.validate(&err));
+
+    RuntimeProfile bad_huge;  // 超上限 3840，拒绝
+    bad_huge.capture.width = 4000;
+    bad_huge.capture.height = 4000;
+    CHECK(!bad_huge.validate(&err));
+
+    // from_json 自愈：磁盘上遗留的 1×1 坏配置加载时纠正为 0（全帧），
+    // 保证 Core 重启不会因历史坏值瞎跑或起不来。
+    const std::string legacy = R"({"capture":{"width":1,"height":1,"offset_x":0,"offset_y":0}})";
+    auto res = json_parse(legacy);
+    CHECK(res.ok);
+    if (res.ok) {
+        RuntimeProfile healed = RuntimeProfile::from_json(res.value);
+        CHECK_EQ(healed.capture.width, 0u);
+        CHECK_EQ(healed.capture.height, 0u);
+        CHECK(healed.validate(&err));  // 自愈后必须能通过校验
+    }
+}
+
 TEST(runtime_profile_personal_motion_roundtrip) {
     RuntimeProfile p;
     p.mouse.personal_motion.enabled = true;

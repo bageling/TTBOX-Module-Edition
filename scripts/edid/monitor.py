@@ -4,6 +4,7 @@
 import glob
 import os
 import struct
+import subprocess
 
 
 def _read_text(path, limit=4096):
@@ -50,7 +51,7 @@ def parse_edid_identity(edid):
     pid = struct.unpack("<H", edid[10:12])[0]
     ser = struct.unpack("<I", edid[12:16])[0]
     name = ""
-    for off in (90, 108, 126):
+    for off in (54, 72, 90, 108, 126):
         if off + 18 <= len(edid) and edid[off] == 0 and edid[off + 1] == 0 and edid[off + 3] == 0xFC:
             name = _descriptor_text(edid, off)
             break
@@ -87,16 +88,38 @@ def read_connector_modes(base):
 
 
 def read_hdmirx_status():
-    """hdmirx（RX 采集口）状态：connected + 当前 EDID 组值。"""
+    """读取 RK3588 HDMI-RX 真实状态，不改变任何硬件节点。"""
     base = "/sys/devices/platform/fdee0000.hdmirx-controller/hdmirx/hdmirx"
     status = _read_text(os.path.join(base, "status"))
-    edid_val = _read_text(os.path.join(base, "edid"))
+    edid_group = _read_text(os.path.join(base, "edid"))
+    debug = _read_text("/sys/kernel/debug/hdmirx/status", 8192)
+    lock_line = next((line.strip() for line in debug.splitlines() if line.startswith("Clk-Ch:")), "")
+    timing = next((line.strip() for line in debug.splitlines() if line.startswith("Timing:")), "")
+    mode = next((line.strip() for line in debug.splitlines() if line.startswith("Mode:")), "")
+    locked = bool(lock_line) and "Unlock" not in lock_line
+    readback = {"valid": False, "size": 0, "name": "", "vendor": "", "product_id": "", "serial": "", "source": ""}
+    for dev in ("/dev/video0", "/dev/video1", "/dev/video2"):
+        if not os.path.exists(dev):
+            continue
+        try:
+            r = subprocess.run(
+                ["v4l2-ctl", "-d", dev, "--get-edid=pad=0,format=raw"],
+                capture_output=True, timeout=5,
+            )
+            raw = r.stdout if r.returncode == 0 else b""
+        except (OSError, subprocess.SubprocessError):
+            raw = b""
+        identity = parse_edid_identity(raw) if raw else None
+        if identity:
+            readback.update(identity)
+            readback.update({"valid": True, "size": len(raw), "source": dev})
+            break
     return {
-        "connected": status == "connected",
-        "status": status,
-        "edid": edid_val,
+        "connected": status == "connected", "status": status,
+        "edid": edid_group, "edid_group": edid_group,
+        "edid_readback": readback,
+        "locked": locked, "lock_channels": lock_line, "timing": timing, "mode": mode,
     }
-
 
 def read_real_monitor_info():
     """读取真实显示器信息（DRM connector）。"""

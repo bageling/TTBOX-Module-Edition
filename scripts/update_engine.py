@@ -24,7 +24,7 @@ STATE_FILE = '/var/lib/ttbox/update/update_state.json'
 LOCK_FILE = '/run/ttbox/update.lock'
 LOG_DIR = '/var/log/ttbox'
 LOG_FILE = '/var/log/ttbox/update.log'
-DEFAULT_SERVER = 'http://127.0.0.1:8000'
+DEFAULT_SERVER = os.environ.get('TTBOX_UPDATE_SERVER', '').strip()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -118,6 +118,8 @@ class UpdateEngine:
     def check_update(self):
         if self.state['state'] not in ['IDLE', 'FAILED', 'ROLLED_BACK']:
             return {'ok': False, 'error': 'Update in progress'}
+        if not self.server_url:
+            return {'ok': False, 'error': 'OTA 更新服务器未配置（TTBOX_UPDATE_SERVER）'}
 
         self._set_state('CHECKING')
         try:

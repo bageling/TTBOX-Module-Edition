@@ -2,7 +2,7 @@
 // 自研 synthetic 模式：无物理鼠标，暴露一个 Corsair HID 鼠标 gadget，
 // AI MOVE 经 mouse_control 协议直接注入。
 #include "synthetic.h"
-#include "mouse_control.h"
+#include "mouse_control.hpp"
 #include "proxy.h"
 #include "misc.h"
 #include "host-raw-gadget.h"
@@ -79,7 +79,7 @@ static int load_gadget_config(const char* path) {
 // host_device_desc 是 raw-gadget 侧的全局描述符（定义见 host-raw-gadget.h）。
 int setup_synthetic_gadget_desc() {
     const char* cfg_path = getenv("USB_PROXY_GADGET_CONFIG_FILE");
-    if (!cfg_path) cfg_path = "/opt/ttbox/usbproxy/gadget-config.json";
+    if (!cfg_path) cfg_path = "gadget-config.json";
     if (load_gadget_config(cfg_path) != 0) return -1;
 
     // 9a80:7072（gadget-config.json 缺省值即 Corsair）

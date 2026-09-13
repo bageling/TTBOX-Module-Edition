@@ -16,7 +16,7 @@ class PreviewFrame:
     source: str = "core_ipc"
 @dataclass
 class PreviewConfig:
-    fps: int = 12
+    fps: int = 30
     jpeg_quality: int = 70
     width: int = 640
     height: int = 360

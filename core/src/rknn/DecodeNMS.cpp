@@ -387,17 +387,17 @@ bool DecodeNMS::process_dfl(const RknnModelInfo& info,
         const float stride_y = static_cast<float>(params_.input_h) / static_cast<float>(grid_h);
 
         for (uint32_t a = 0; a < n_anchors; ++a) {
-            // cls：sigmoid + max/argmax
-            float best = -1.0f;
+            // cls：sigmoid 单调，argmax 在 logits 域做，只对最优类算一次 sigmoid
+            float best_v = -1e30f;
             int best_id = 0;
             for (uint32_t c = 0; c < n_classes; ++c) {
                 const float v = read_elem(co, cbuf, static_cast<size_t>(c) * n_anchors + a);
-                const float s = 1.0f / (1.0f + std::exp(-v));
-                if (s > best) {
-                    best = s;
+                if (v > best_v) {
+                    best_v = v;
                     best_id = static_cast<int>(c);
                 }
             }
+            const float best = 1.0f / (1.0f + std::exp(-best_v));
             if (best < params_.conf_thres) continue;
 
             const uint32_t row = a / grid_w;
@@ -486,8 +486,50 @@ bool DecodeNMS::process_dfl_pair_dist(const RknnModelInfo& info, const void* con
         const auto& ro=info.outputs[p]; const auto& co=info.outputs[p+1];
         if(ro.dims.size()!=4 || ro.dims[1]%4!=0 || co.dims.size()!=4 || ro.dims[2]!=co.dims[2] || ro.dims[3]!=co.dims[3]) { if(error)*error="DFL pair 输出格式无法解析"; return false; }
         const uint32_t bins=ro.dims[1]/4, gh=ro.dims[2], gw=ro.dims[3], n=gh*gw, nc=co.dims[1];
+        if (bins > 64) {
+            if (error) *error = "DFL pair bins 超过 64（reg_ch=" + std::to_string(ro.dims[1]) + "），超出解码器上限";
+            return false;
+        }
         const auto* rb=static_cast<const uint8_t*>(out_bufs[p]); const auto* cb=static_cast<const uint8_t*>(out_bufs[p+1]);
-        for(uint32_t a=0;a<n;++a){ float best=-1; int bi=0; for(uint32_t c=0;c<nc;++c){float v=read_elem(co,cb,(size_t)c*n+a);float q=1.f/(1.f+std::exp(-v));if(q>best){best=q;bi=(int)c;}} if(best<params_.conf_thres)continue; float d[4]{}; for(uint32_t e=0;e<4;++e){float mx=-1e30f,sum=0;for(uint32_t b=0;b<bins;++b)mx=std::max(mx,read_elem(ro,rb,(size_t)e*bins*n+(size_t)b*n+a));for(uint32_t b=0;b<bins;++b)sum+=std::exp(read_elem(ro,rb,(size_t)e*bins*n+(size_t)b*n+a)-mx);for(uint32_t b=0;b<bins;++b)d[e]+=b*std::exp(read_elem(ro,rb,(size_t)e*bins*n+(size_t)b*n+a)-mx)/sum;}float sx=(float)params_.input_w/gw,sy=(float)params_.input_h/gh,cx=(a%gw+.5f)*sx,cy=(a/gw+.5f)*sy;DetectionBox x{cx-d[0]*sx,cy-d[1]*sy,cx+d[2]*sx,cy+d[3]*sy,best,bi};cands_.push_back(x);}
+        for (uint32_t a = 0; a < n; ++a) {
+            // cls：sigmoid 单调，argmax 在 logits 域做，只对最优类算一次 sigmoid
+            float best_v = -1e30f;
+            int bi = 0;
+            for (uint32_t c = 0; c < nc; ++c) {
+                const float v = read_elem(co, cb, static_cast<size_t>(c) * n + a);
+                if (v > best_v) {
+                    best_v = v;
+                    bi = static_cast<int>(c);
+                }
+            }
+            const float best = 1.0f / (1.0f + std::exp(-best_v));
+            if (best < params_.conf_thres) continue;
+            float d[4]{};
+            for (uint32_t e = 0; e < 4; ++e) {
+                const size_t base = static_cast<size_t>(e) * bins * n;
+                float vals[64];
+                float mx = -1e30f;
+                for (uint32_t b = 0; b < bins; ++b) {
+                    const float v = read_elem(ro, rb, base + static_cast<size_t>(b) * n + a);
+                    vals[b] = v;
+                    if (v > mx) mx = v;
+                }
+                float sum = 0.0f, dsum = 0.0f;
+                for (uint32_t b = 0; b < bins; ++b) {
+                    const float w = std::exp(vals[b] - mx);
+                    sum += w;
+                    dsum += static_cast<float>(b) * w;
+                }
+                d[e] = sum > 1e-12f ? dsum / sum : 0.0f;
+            }
+            const float sx = static_cast<float>(params_.input_w) / gw;
+            const float sy = static_cast<float>(params_.input_h) / gh;
+            const float cx = (static_cast<float>(a % gw) + 0.5f) * sx;
+            const float cy = (static_cast<float>(a / gw) + 0.5f) * sy;
+            DetectionBox x{cx - d[0] * sx, cy - d[1] * sy,
+                           cx + d[2] * sx, cy + d[3] * sy, best, bi};
+            cands_.push_back(x);
+        }
     }
     stats_.decode.add(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now()-t_decode0).count());
     // 与其它 Decoder 一致：按类别执行 NMS、坐标映射和后过滤。
@@ -558,6 +600,10 @@ bool DecodeNMS::process_dfl_dist(const RknnModelInfo& info,
         }
         const uint32_t n_bins = reg_ch / 4;   // 16
         const uint32_t n_anchors = grid_h * grid_w;
+        if (n_bins > 64) {
+            if (error) *error = "DFL bins 超过 64（reg_ch=" + std::to_string(reg_ch) + "），超出解码器上限";
+            return false;
+        }
         const float stride_x = static_cast<float>(params_.input_w) / static_cast<float>(grid_w);
         const float stride_y = static_cast<float>(params_.input_h) / static_cast<float>(grid_h);
 
@@ -574,47 +620,50 @@ bool DecodeNMS::process_dfl_dist(const RknnModelInfo& info,
         }
 
         for (uint32_t a = 0; a < n_anchors; ++a) {
-            // cls：sigmoid + max/argmax
-            float best = -1.0f;
+            // aux 预过滤：score = cls_best × aux <= aux，aux 低于阈值时
+            // 任何类别都不可能过阈值，直接跳过省掉整组 cls sigmoid。
+            float auxv = 1.0f;
+            if (aux_obj) {
+                auxv = read_elem(ao, abuf, a);
+                if (auxv < params_.conf_thres) continue;
+            }
+            // cls：sigmoid 单调，argmax 在 logits 域做，只对最优类算一次 sigmoid
+            //（省 7/8 的 exp，结果与逐类 sigmoid 完全一致）。
+            float best_v = -1e30f;
             int best_id = 0;
             for (uint32_t c = 0; c < n_classes; ++c) {
                 const float v = read_elem(co, cbuf, static_cast<size_t>(c) * n_anchors + a);
-                const float s = 1.0f / (1.0f + std::exp(-v));
-                if (s > best) {
-                    best = s;
+                if (v > best_v) {
+                    best_v = v;
                     best_id = static_cast<int>(c);
                 }
             }
-            float score = best;
-            if (aux_obj) {
-                score *= read_elem(ao, abuf, a);
-            }
+            const float best = 1.0f / (1.0f + std::exp(-best_v));
+            float score = best * auxv;
             if (score < params_.conf_thres) continue;
 
-            // DFL softmax 解码 4 边距离（通道边主序：edge*n_bins + bin）
+            // DFL softmax 解码 4 边距离（通道边主序：edge*n_bins + bin）。
+            // 单遍实现：先缓存整行 bin 值并求 max，再一次性 exp+加权求和，
+            // 每个 bin 只 read 一次、只 exp 一次（旧实现 read/exp 各 2~3 次）。
             float dist[4];
             for (uint32_t e = 0; e < 4; ++e) {
                 const size_t base = static_cast<size_t>(e) * n_bins * n_anchors;
+                float vals[64];
                 float mx = -1e30f;
                 for (uint32_t b = 0; b < n_bins; ++b) {
                     const float v = read_elem(ro, rbuf,
                                               base + static_cast<size_t>(b) * n_anchors + a);
+                    vals[b] = v;
                     if (v > mx) mx = v;
                 }
                 float sum = 0.0f;
+                float dsum = 0.0f;
                 for (uint32_t b = 0; b < n_bins; ++b) {
-                    sum += std::exp(read_elem(ro, rbuf,
-                                              base + static_cast<size_t>(b) * n_anchors + a) - mx);
+                    const float w = std::exp(vals[b] - mx);
+                    sum += w;
+                    dsum += static_cast<float>(b) * w;
                 }
-                float d = 0.0f;
-                if (sum > 1e-12f) {
-                    for (uint32_t b = 0; b < n_bins; ++b) {
-                        const float w = std::exp(read_elem(ro, rbuf,
-                                              base + static_cast<size_t>(b) * n_anchors + a) - mx) / sum;
-                        d += static_cast<float>(b) * w;
-                    }
-                }
-                dist[e] = d;
+                dist[e] = sum > 1e-12f ? dsum / sum : 0.0f;
             }
             const uint32_t row = a / grid_w;
             const uint32_t col = a % grid_w;

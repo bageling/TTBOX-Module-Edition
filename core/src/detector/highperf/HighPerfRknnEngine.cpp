@@ -23,7 +23,36 @@ bool HighPerfRknnEngine::run(std::string* error) { if (error) *error = "RKNN 仅
 #include <vector>
 #include <rknn_api.h>
 
+#if defined(__ARM_NEON)
+#include <arm_neon.h>
+#endif
+
 namespace ttbox::core::highperf {
+
+namespace {
+
+// pass_through=1 的零拷贝输入 mem 是模型原生 int8，uint8 像素需 XOR 0x80
+// 完成“减 128”量化映射，与 WorkerPool 路径保持一致。
+void copy_uint8_to_int8_shift128(uint8_t* dst, const uint8_t* src, size_t n) {
+#if defined(__ARM_NEON)
+    const uint8x16_t bias = vdupq_n_u8(0x80);
+    size_t i = 0;
+    for (; i + 64 <= n; i += 64) {
+        vst1q_u8(dst + i +  0, veorq_u8(vld1q_u8(src + i +  0), bias));
+        vst1q_u8(dst + i + 16, veorq_u8(vld1q_u8(src + i + 16), bias));
+        vst1q_u8(dst + i + 32, veorq_u8(vld1q_u8(src + i + 32), bias));
+        vst1q_u8(dst + i + 48, veorq_u8(vld1q_u8(src + i + 48), bias));
+    }
+    for (; i + 16 <= n; i += 16) {
+        vst1q_u8(dst + i, veorq_u8(vld1q_u8(src + i), bias));
+    }
+    for (; i < n; ++i) dst[i] = static_cast<uint8_t>(src[i] ^ 0x80);
+#else
+    for (size_t i = 0; i < n; ++i) dst[i] = static_cast<uint8_t>(src[i] ^ 0x80);
+#endif
+}
+
+}  // namespace
 
 struct HighPerfRknnEngine::Impl {
     rknn_context context = 0;
@@ -112,7 +141,13 @@ size_t HighPerfRknnEngine::output_memory_size(uint32_t index) const { return imp
 
 bool HighPerfRknnEngine::copy_input(const void* data, size_t size, std::string* error) {
     if (!zero_copy_ready_ || !input_memory() || size > input_memory_size()) { if (error) *error = "零拷贝输入缓冲区无效或尺寸超限"; return false; }
-    std::memcpy(input_memory(), data, size); return true;
+    if (pass_through_) {
+        copy_uint8_to_int8_shift128(static_cast<uint8_t*>(input_memory()),
+                                    static_cast<const uint8_t*>(data), size);
+    } else {
+        std::memcpy(input_memory(), data, size);
+    }
+    return true;
 }
 bool HighPerfRknnEngine::run(std::string* error) {
     if (!zero_copy_ready_) { if (error) *error = "零拷贝后端未初始化"; return false; }

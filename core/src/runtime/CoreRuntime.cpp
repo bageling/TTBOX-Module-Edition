@@ -26,6 +26,7 @@ bool CoreRuntime::initialize(const Params& p, std::string* error) {
         return false;
     }
     runtime_config_ = p.runtime_config;
+    mouse_event_socket_ = p.mouse_event_socket;
     output_ = p.output;
     worker_params_ = p.workers;
     preview_params_ = p.preview;
@@ -42,13 +43,30 @@ bool CoreRuntime::initialize(const Params& p, std::string* error) {
 }
 
 bool CoreRuntime::start(std::string* error) {
-    if (!capture_ || !workers_ || !mailbox_ || running_.exchange(true)) return false;
+    if (!capture_ || !workers_ || !mailbox_) {
+        if (error) *error = "内部对象未初始化";
+        return false;
+    }
+    bool expected = false;
+    if (!running_.compare_exchange_strong(expected, true)) {
+        if (error) *error = "已在运行中";
+        return false;
+    }
     // 重启（停止→启动）时清空 mailbox 残留任务：V4L2 sequence 重新从 0 计数，
     // 不清空会导致 AimThread last_frame 被旧任务抬高，新帧全被 take_latest 去重丢弃
     // （重启后 1~3 分钟检测框不更新，直到帧号重新涨回旧值）。
     mailbox_->clear();
     start_steady_ms_.store(steady_now_ms());
-    if (!capture_->open(error) || !capture_->start(error)) {
+    if (!capture_->open(error)) {
+        start_steady_ms_.store(0);
+        running_ = false;
+        return false;
+    }
+    if (!capture_->start(error)) {
+        // open 已成功，start 失败也必须关闭设备；否则 running=false 后 stop()
+        // 会直接返回，半启动的 V4L2 fd 永久泄漏，后续自动重试持续报占用。
+        capture_->close();
+        start_steady_ms_.store(0);
         running_ = false;
         return false;
     }
@@ -61,10 +79,12 @@ bool CoreRuntime::start(std::string* error) {
     if (!workers_->start(worker_params_, error)) {
         capture_->stop();
         capture_->close();
+        start_steady_ms_.store(0);
         running_ = false;
         return false;
     }
     std::string mouse_error;
+    mouse_reader_.set_event_socket_path(mouse_event_socket_);
     if (!mouse_reader_.start("", &mouse_error)) {
         TTBOX_LOG_WARN("PhysicalMouseReader 启动失败（不阻塞 AI 流水线）: " + mouse_error);
     }
@@ -74,9 +94,11 @@ bool CoreRuntime::start(std::string* error) {
     }
     if (!aim_thread_.start(mailbox_.get(), output_, 4000, runtime_config_,
                            mouse_reader_.button_source())) {
+        mouse_reader_.stop();
         workers_->stop();
         capture_->stop();
         capture_->close();
+        start_steady_ms_.store(0);
         running_ = false;
         return false;
     }
@@ -94,6 +116,10 @@ bool CoreRuntime::start(std::string* error) {
                 if (profile->preview.fps > 0 && profile->preview.fps <= 60) {
                     preview_params.fps = static_cast<int>(profile->preview.fps);
                 }
+                // 必须在 PreviewModule::start() 之前应用尺寸；此前只修改了
+                // 启动后的日志变量，实际编码仍沿用默认 640x640。
+                if (profile->preview.width > 0) preview_params.crop_width = profile->preview.width;
+                if (profile->preview.height > 0) preview_params.crop_height = profile->preview.height;
             }
         }
         if (!preview_->start(capture_->latest_frame_ref(), preview_params, &preview_error)) {
@@ -104,21 +130,61 @@ bool CoreRuntime::start(std::string* error) {
                 preview_->set_detections_provider(
                     [this]() { return aim_thread_.status().detection_boxes; });
             }
-            uint32_t crop_width = preview_params.crop_width;
-            uint32_t crop_height = preview_params.crop_height;
-            if (runtime_config_) {
-                if (auto profile = runtime_config_->snapshot()) {
-                    if (profile->capture.width > 0) crop_width = profile->capture.width;
-                    if (profile->capture.height > 0) crop_height = profile->capture.height;
-                }
-            }
             TTBOX_LOG_INFO("Preview 已启动: center crop " +
-                           std::to_string(crop_width) + "x" + std::to_string(crop_height) +
+                           std::to_string(preview_params.crop_width) + "x" +
+                           std::to_string(preview_params.crop_height) +
                            " @" + std::to_string(preview_params.fps) + "fps" +
                            (preview_params.draw_detections ? " +draw_detections" : ""));
         }
     }
     return true;
+}
+
+bool CoreRuntime::reload_workers(const WorkerPool::Params& params, std::string* error) {
+    if (!running_.load()) {
+        if (error) *error = "runtime 未运行，无法热重载 worker";
+        return false;
+    }
+    if (!capture_ || !workers_ || !mailbox_) {
+        if (error) *error = "内部对象未初始化";
+        return false;
+    }
+    const auto fmt = capture_->format();
+    const WorkerPool::Params previous = worker_params_;
+    WorkerPool::Params next = params;
+    next.latest = capture_->latest_frame_ref();
+    next.aim_mailbox = mailbox_.get();
+    next.runtime_config = runtime_config_;
+    next.frame_w = fmt.width;
+    next.frame_h = fmt.height;
+
+    workers_->stop();
+    mailbox_->clear();
+    worker_params_ = next;
+    if (workers_->start(worker_params_, error)) {
+        return true;
+    }
+
+    WorkerPool::Params restore = previous;
+    restore.latest = capture_->latest_frame_ref();
+    restore.aim_mailbox = mailbox_.get();
+    restore.runtime_config = runtime_config_;
+    restore.frame_w = fmt.width;
+    restore.frame_h = fmt.height;
+    worker_params_ = restore;
+    mailbox_->clear();
+    std::string restore_error;
+    if (!workers_->start(restore, &restore_error)) {
+        if (error && !error->empty()) {
+            *error = "worker 热重载失败且旧 worker 恢复失败: " + *error + " / " + restore_error;
+        } else if (error) {
+            *error = "worker 热重载失败且旧 worker 恢复失败: " + restore_error;
+        }
+        stop();
+        return false;
+    }
+    if (error) *error = "worker 热重载失败，已恢复旧 worker";
+    return false;
 }
 
 bool CoreRuntime::model_ready() const {
@@ -137,7 +203,10 @@ uint64_t CoreRuntime::model_errors() const {
 }
 
 void CoreRuntime::stop() {
-    if (!running_.exchange(false)) return;
+    // stop 必须对“启动中途失败”和“已停止”同样生效：即使 running_ 已经
+    // 被 start() 的失败路径清零，也要再次清理可能残留的线程、V4L2 fd、
+    // preview 和 mailbox 资源。各子模块的 stop/close 都是幂等的。
+    running_.store(false);
     start_steady_ms_.store(0);
     if (preview_) {
         preview_->stop();
@@ -170,7 +239,7 @@ void CoreRuntime::collect_metrics(PipelineMetrics* out) const {
         double infer_avg_us = 0.0;
         double si_avg_us = 0.0, run_avg_us = 0.0, out_avg_us = 0.0;
         double decode_avg_us = 0.0, e2e_avg_us = 0.0;
-        double convert_avg_us = 0.0, qwait_avg_us = 0.0;
+        double rga_avg_us = 0.0, qwait_avg_us = 0.0;
         const size_t worker_count = workers_->worker_count();
         StatsCollector e2e_all, infer_all, decode_all;
         for (const auto& worker : workers_->workers()) {
@@ -183,7 +252,7 @@ void CoreRuntime::collect_metrics(PipelineMetrics* out) const {
             out_avg_us += stats.stages.output.avg();
             decode_avg_us += stats.decode_stages.total.avg();
             e2e_avg_us += stats.e2e.avg();
-            convert_avg_us += stats.convert.avg();
+            rga_avg_us += stats.rga.avg();
             qwait_avg_us += stats.queue_wait.avg();
             e2e_all.absorb(stats.e2e);
             infer_all.absorb(stats.stages.total);
@@ -202,7 +271,9 @@ void CoreRuntime::collect_metrics(PipelineMetrics* out) const {
         out->infer_output_ms = out_avg_us / static_cast<double>(worker_count) / 1000.0;
         out->decode_ms = decode_avg_us / static_cast<double>(worker_count) / 1000.0;
         out->e2e_ms = e2e_avg_us / static_cast<double>(worker_count) / 1000.0;
-        out->resize_ms = convert_avg_us / static_cast<double>(worker_count) / 1000.0;
+        // resize_ms 的语义是完整 RGA 预处理耗时（含输入 DMA-BUF import、crop、resize、release），
+        // 不能使用从未在生产路径吸收的 convert 统计，否则 Web 会稳定显示 0。
+        out->resize_ms = rga_avg_us / static_cast<double>(worker_count) / 1000.0;
         out->buffer_age_ms = qwait_avg_us / static_cast<double>(worker_count) / 1000.0;
         out->e2e_p50_ms = e2e_all.percentile(50) / 1000.0;
         out->e2e_p95_ms = e2e_all.percentile(95) / 1000.0;
@@ -219,8 +290,8 @@ void CoreRuntime::collect_metrics(PipelineMetrics* out) const {
         aim::AimTargetTask task;
         if (mailbox_->take_latest(&task)) out->detect_count = task.detections.size();
     }
-    out->tracks = aim_thread_.status().tracks;
     const auto aim_status = aim_thread_.status();
+    out->tracks = aim_status.tracks;
     out->aim_error_x = aim_status.error_x;
     out->aim_error_y = aim_status.error_y;
     out->target_point_x = aim_status.target_point_x;
@@ -253,14 +324,15 @@ void CoreRuntime::collect_metrics(PipelineMetrics* out) const {
         out->preview_frames = metrics.frames.load();
         out->preview_dropped = metrics.dropped.load();
     }
-    const auto final_status = aim_thread_.status();
-    out->mouse_dx = final_status.move_x;
-    out->mouse_dy = final_status.move_y;
-    out->gated_frames = final_status.gated_frames;
-    out->target_frames = final_status.target_frames;
-    out->no_target_frames = final_status.no_target_frames;
-    out->aim_active = final_status.has_target;
-    out->injection_allowed = final_status.last_injection_allowed;
+    out->mouse_dx = aim_status.move_x;
+    out->mouse_dy = aim_status.move_y;
+    out->gated_frames = aim_status.gated_frames;
+    out->target_frames = aim_status.target_frames;
+    out->no_target_frames = aim_status.no_target_frames;
+    out->last_frame = aim_status.last_frame;
+    out->last_timestamp_us = aim_status.last_timestamp_us;
+    out->aim_active = aim_status.has_target;
+    out->injection_allowed = aim_status.last_injection_allowed;
     if (auto* backend = dynamic_cast<output::OutputBackend*>(output_.get())) {
         const auto health = backend->health();
         out->mouse_control_connected = health.state == output::BackendState::kConnected;

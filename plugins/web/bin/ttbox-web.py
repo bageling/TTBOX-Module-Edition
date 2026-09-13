@@ -20,6 +20,7 @@ import struct
 import subprocess
 import sys
 import threading
+import zipfile
 import time
 from http import HTTPStatus
 from pathlib import Path
@@ -71,6 +72,8 @@ DEFAULT_LICENSE = {
     'activated': True, 'valid': True, 'mode': 'ttbox',
     'status': 'valid', 'message': '',
 }
+
+TTBOX_APP_VERSION = '2026.08.03.1'
 
 
 # ====================================================================
@@ -735,7 +738,7 @@ def profile_to_yu(prof: dict) -> dict:
         }, 'rapid_fire': {}, 'auto_back_flick': {}, 'crosshair': {},
         'auto_trigger': {'enabled': False, 'profiles': []},
         'hotkey_guard': {'enabled': False, 'toggle_hotkey': 'middle'},
-        'mouse_output': {'mode': 'passthrough'},
+        'mouse_output': {'mode': 'full_passthrough'},
         'latency': lat, 'fan_control': {}, 'loopout_overlay': {},
     }
 
@@ -785,20 +788,30 @@ def collect_yu_state() -> dict:
             'output_count': mm.get('output_count', 0),
             'class_count': mm.get('class_count', 0),
             'class_names': mm.get('class_names') or [],
-            'rknn_concurrency': mm.get('rknn_concurrency', 1),
+            'rknn_concurrency': _effective_rknn_concurrency(mm),
         })
-    active_model = ml_data.get('active', '')
+    models = [_merge_model_ui_meta(m) for m in models]
+    active_model = registry_active or prof.get('model_id', '') or ''
 
     m = st.get('metrics', {})
     # config 回读直接复用 profile_to_yu（单一真源，避免两处翻译漂移）
     config_yu = profile_to_yu(prof)
     running = bool(st.get('running')) and bool(st.get('runtime_running'))
+    capture_fps = float(m.get('capture_fps') or 0.0)
+    input_width = int(m.get('input_width') or 0)
+    input_height = int(m.get('input_height') or 0)
+    # CoreRuntime 的真实指标没有 infer_total/last_frame 这两个旧字段。
+    # HDMI 是否恢复只看采集 FPS 和有效输入尺寸，避免有帧时仍错误显示 degraded。
+    degraded = running and (capture_fps <= 0.0 or input_width <= 0 or input_height <= 0)
+    last_frame = int(m.get('last_frame') or 0)
+    runtime_status = 'degraded' if degraded else ('running' if running else 'stopped')
+    runtime_error = m.get('last_error') or ('HDMI 输入未锁定或尚未收到帧' if degraded else '')
 
     return {
         'ok': True,
         'data': {
-            'app_version': str(st.get('version', '2026.08.03.1')) or '2026.08.03.1',
-            'version': str(st.get('version', '2026.08.03.1')) or '2026.08.03.1',
+            'app_version': str(st.get('version', TTBOX_APP_VERSION)) or TTBOX_APP_VERSION,
+            'version': str(st.get('version', TTBOX_APP_VERSION)) or TTBOX_APP_VERSION,
             'config': config_yu,
             'auto_start': _auto_start_payload(),
             # 预览流健康：前端据此在服务重启/断线后自动重建 MJPEG 连接（防卡框冻结）
@@ -807,7 +820,7 @@ def collect_yu_state() -> dict:
                 'active_conns': _PREVIEW_MONITOR['active_conns'],
             },
             'models': models,  # YU 同构：数组
-            'selected_model_id': registry_active or active_model,
+            'selected_model_id': active_model,
             'presets': sorted(Path(PRESETS_DIR).glob('*.json')) and
                        [p.stem for p in sorted(Path(PRESETS_DIR).glob('*.json'))] or [],
             'state': {
@@ -817,19 +830,29 @@ def collect_yu_state() -> dict:
                     'active_target_track_id': int(m.get('aim_target_id', -1)),
                     'aim_profile_alternate_offset_states': [False],
                     'hotkeys_suspended': False,
-                    'last_error': m.get('last_error') or ('未导入模型' if not prof.get('model_id') else ''),
+                    'last_error': runtime_error or ('未导入模型' if not prof.get('model_id') else ''),
                     'locked': False,
                 },
-                'last_error': m.get('last_error') or ('未导入模型' if not prof.get('model_id') else ''),
+                'last_error': runtime_error or ('未导入模型' if not prof.get('model_id') else ''),
                 # 自动标定状态由 TTBOX Calibration Domain 维护，普通轮询只读，不触发保存提示。
                 'calibration': _calibration_payload()['runtime'],
                 'capture': {
-                    'input_width': m.get('input_width', 0),
-                    'input_height': m.get('input_height', 0),
-                    'capture_fps': m.get('capture_fps', 0),
+                    'input_width': input_width,
+                    'input_height': input_height,
+                    'capture_fps': capture_fps,
                     'buffer_age_ms': m.get('buffer_age_ms', 0),
                     'last_dequeued_count': m.get('last_dequeued_count', 0),
                     'buffer_count': m.get('buffer_count', 0),
+                },
+                # 预览链路真实指标（PreviewModule 统计；0 = 未启动/无样本）
+                'preview': {
+                    'fps': m.get('preview_fps', 0),
+                    'encode_ms': m.get('preview_encode_ms', 0),
+                    'width': m.get('preview_width', 0),
+                    'height': m.get('preview_height', 0),
+                    'bytes': m.get('preview_bytes', 0),
+                    'frames': m.get('preview_frames', 0),
+                    'dropped': m.get('preview_dropped', 0),
                 },
                 'core': _core_state_payload(),
                 'crosshair': {
@@ -846,7 +869,7 @@ def collect_yu_state() -> dict:
                     'inference_fps': m.get('fps', 0),
                     'inference_ms': m.get('infer_ms', 0),
                     'model_loaded': bool(prof.get('model_id')),
-                    'frame_id': m.get('last_frame', 0),
+                    'frame_id': last_frame,
                     'timestamp_us': m.get('last_timestamp_us', 0),
                     'target_box': {
                         'x1': m.get('aim_target_x1', 0),
@@ -858,7 +881,19 @@ def collect_yu_state() -> dict:
                     } if m.get('aim_has_target', False) else None,
                     'boxes': m.get('detection_boxes', []),
                 },
-                'latency': {'capture_to_mouse_send_ms': m.get('e2e_ms', 0), 'preprocess_to_track_ms': m.get('e2e_ms', 0)},
+                'latency': {
+                    'capture_to_mouse_send_ms': m.get('e2e_ms', 0),
+                    'preprocess_to_track_ms': m.get('e2e_ms', 0),
+                    'queue_wait_ms': m.get('buffer_age_ms', 0),
+                    'rga_ms': m.get('resize_ms', 0),
+                    'rknn_set_input_ms': m.get('infer_set_input_ms', 0),
+                    'rknn_ms': m.get('infer_run_ms', 0),
+                    'rknn_output_ms': m.get('infer_output_ms', 0),
+                    'decode_ms': m.get('decode_ms', 0),
+                    'e2e_ms': m.get('e2e_ms', 0),
+                    'e2e_p95_ms': m.get('e2e_p95_ms', 0),
+                    'e2e_p99_ms': m.get('e2e_p99_ms', 0),
+                },
                 'loopout': _loopout_payload(),
                 'motion_training': {
                     'collection_active': False,
@@ -891,7 +926,7 @@ def collect_yu_state() -> dict:
                 'license': DEFAULT_LICENSE,
                 # 物理移动屏蔽实时状态（真实来源：RuntimeProfile mouse 配置 + 输出模式支持性）
                 'mouse_output': {
-                    'mode': 'local_hid',
+                    'mode': 'full_passthrough',
                     'physical_motion_block_support': 'supported',
                     'physical_motion_block_mask': (
                         (1 if (prof.get('mouse') or {}).get('block_physical_x') else 0) |
@@ -902,9 +937,9 @@ def collect_yu_state() -> dict:
                 # MJPEG 流（动态预览）：img 标签原生支持 multipart/x-mixed-replace，
                 # 前端 previewImage 直接消费；不能用 /api/preview.jpg（静态单帧，加载一次就冻结）
                 'preview_path': '/api/preview.mjpg',
-                'running': running,
+                'running': running and not degraded,
                 'selected_model_id': prof.get('model_id', ''),
-                'status': 'running' if running else 'stopped',
+                'status': runtime_status,
             },
             'ui': {
                 'app_title': 'TTBOX 控制台',
@@ -912,11 +947,11 @@ def collect_yu_state() -> dict:
                 'brand_mark': 'TT',
                 'brand_eyebrow': 'TTBOX',
                 'brand_title': 'TTBOX 控制台',
-                'ui_brand': 'yu',
+                'ui_brand': 'ttbox',
                 'default_theme': 'dark',
                 'allow_theme_switch': True,
             },
-            'ui_brand': 'yu',
+            'ui_brand': 'ttbox',
         },
     }
 
@@ -948,12 +983,12 @@ def add_no_cache_headers(response):
 def index():
     return render_template('index.html',
         app_title='TTBOX 控制台',
-        ui_brand='yu',
+        ui_brand='ttbox',
         brand_mark='TT',
         brand_eyebrow='TTBOX',
         brand_title='TTBOX 控制台',
         default_theme='dark',
-        asset_version='2026.09.01.1',
+        asset_version='2026.09.13.1',
         visual_theme={'id': 'default', 'version': 'built-in', 'color_scheme': 'dark', 'styles': []},
         module_labels=['首页', '配置', '模型', '预设', '运动', '校准', '硬件', '网络', '系统', '更新', '主题', '激活'],
         motion_training_available=True,
@@ -968,10 +1003,10 @@ def index():
 @app.get('/desktop')
 def desktop():
     return render_template('index.html', mode='desktop',
-        app_title='TTBOX 控制台', ui_brand='yu',
+        app_title='TTBOX 控制台', ui_brand='ttbox',
         brand_mark='TT', brand_eyebrow='TTBOX', brand_title='TTBOX 控制台',
         default_theme='dark',
-        asset_version='2026.09.01.1',
+        asset_version='2026.09.13.1',
         visual_theme={'id': 'default', 'version': 'built-in', 'color_scheme': 'dark', 'styles': []},
         module_labels=['首页', '配置', '模型', '预设', '运动', '校准', '硬件', '网络', '系统', '更新', '主题', '激活'],
         motion_training_available=True,
@@ -986,10 +1021,10 @@ def desktop():
 @app.get('/mobile')
 def mobile():
     return render_template('index.html', mode='mobile',
-        app_title='TTBOX 控制台', ui_brand='yu',
+        app_title='TTBOX 控制台', ui_brand='ttbox',
         brand_mark='TT', brand_eyebrow='TTBOX', brand_title='TTBOX 控制台',
         default_theme='dark',
-        asset_version='2026.09.01.1',
+        asset_version='2026.09.13.1',
         visual_theme={'id': 'default', 'version': 'built-in', 'color_scheme': 'dark', 'styles': []},
         module_labels=['首页', '配置', '模型', '预设', '运动', '校准', '硬件', '网络', '系统', '更新', '主题', '激活'],
         motion_training_available=True,
@@ -1263,6 +1298,11 @@ def update_config():
     if not isinstance(body, dict) or not body:
         return jsonify({'ok': True, 'data': profile_to_yu(prof)})
     translated = yu_body_to_profile(body)
+    # 模型选中唯一真源是 ModelRegistry 的 active（/api/models/select 修改）。
+    # 配置保存只在 body 明确携带非空 model_id 时透传；空串/缺失一律忽略，
+    # 防止前端临时缺模型列表时回写空 model_id 把激活模型清掉。
+    if not str(translated.get('model_id') or '').strip():
+        translated.pop('model_id', None)
     base = prof
     merged = _deep_merge_profile(base, translated)
     r = ipc_request('SET_CONFIG', {'profile': merged})
@@ -1428,6 +1468,158 @@ def update_auto_start_setting():
         return jsonify({'ok': False, 'error': f'保存开机自启动设置失败: {exc}'}), 500
 
 
+# -- 模型卡 UI 扩展字段持久化（game_profile/preset_name/hailo/remote 等）--
+# 不进 core manifest：这些是 Web 层 UI 绑定字段，独立存 installed/<id>/ui_meta.json，
+# 避免污染 ModelAdapter 校验元数据、也不需要重编 Core。
+_MODEL_UI_META_KEYS = ('game_profile', 'preset_name', 'hailo_pipeline_depth',
+                       'remote_frame_format', 'class_names', 'description')
+
+
+def _model_ui_meta_path(model_id: str) -> Path:
+    return Path(os.environ.get('TTBOX_MODEL_ROOT', '/opt/ttbox/models')) / 'installed' / model_id / 'ui_meta.json'
+
+
+def _read_model_ui_meta(model_id: str) -> dict:
+    try:
+        p = _model_ui_meta_path(model_id)
+        if p.exists():
+            data = json.loads(p.read_text(encoding='utf-8'))
+            return data if isinstance(data, dict) else {}
+    except Exception:
+        pass
+    return {}
+
+
+def _write_model_ui_meta(model_id: str, patch: dict) -> dict:
+    cur = _read_model_ui_meta(model_id)
+    for key in _MODEL_UI_META_KEYS:
+        if key in patch:
+            cur[key] = patch[key]
+    p = _model_ui_meta_path(model_id)
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix('.json.tmp')
+        tmp.write_text(json.dumps(cur, ensure_ascii=False, indent=2), encoding='utf-8')
+        os.replace(str(tmp), str(p))
+    except Exception:
+        raise
+    return cur
+
+
+def _merge_model_ui_meta(model: dict) -> dict:
+    merged = dict(model)
+    meta = _read_model_ui_meta(str(model.get('model_id') or model.get('id') or ''))
+    if meta:
+        for key in _MODEL_UI_META_KEYS:
+            if key in meta:
+                merged[key] = meta[key]
+    return merged
+
+
+def _effective_rknn_concurrency(record: dict) -> int:
+    """界面显示的并发 = Core 实际 worker 数。
+    manifest 显式配置了 worker_cores 就用它；否则回退全局 config 默认。"""
+    wc = str(record.get('worker_cores') or '').strip()
+    if not wc:
+        cfg = _load_config_file()
+        wc = str((cfg or {}).get('worker_cores') or '').strip()
+    tokens = [t.strip() for t in wc.split(',') if t.strip() in ('1', '2', '4')]
+    count = len(tokens)
+    return count if 1 <= count <= 3 else 3
+
+
+def _models_patch_response(model_id: str, patch: dict):
+    """统一返回：校验模型存在 → 写 ui_meta → 附带最新模型列表。模型不可用时返回 None。"""
+    check = ipc_request('MODEL_LIST')
+    if check.get('status') != 0:
+        return None
+    known = [m.get('model_id') for m in check.get('data', {}).get('models', [])]
+    if model_id not in known:
+        return None
+    _write_model_ui_meta(model_id, patch)
+    models_resp = list_models()
+    models_data = {}
+    if models_resp is not None:
+        try:
+            models_data = models_resp.get_json() or {}
+        except Exception:
+            models_data = {}
+    return {'ok': True, 'data': {
+        'message': '已保存',
+        'model_id': model_id,
+        **(models_data.get('data') or {}),
+    }}
+
+
+def _parse_model_labels_file(f) -> list:
+    """解析导入表单的类别标签文件（.txt/.names/.json/.csv），返回去重后的类别名列表。"""
+    if f is None or not f.filename:
+        return []
+    filename = (f.filename or '').lower()
+    raw = f.read()
+    try:
+        text = raw.decode('utf-8', errors='replace') if isinstance(raw, bytes) else str(raw)
+    except Exception:
+        text = str(raw)
+    items: list = []
+    if filename.endswith('.json'):
+        try:
+            data = json.loads(text)
+        except Exception:
+            return []
+        if isinstance(data, list):
+            items = [str(x).strip() for x in data if str(x).strip()]
+        elif isinstance(data, dict):
+            for key in ('class_names', 'classes', 'names', 'labels'):
+                candidate = data.get(key)
+                if isinstance(candidate, list):
+                    items = [str(x).strip() for x in candidate if str(x).strip()]
+                    break
+                if isinstance(candidate, dict):
+                    items = [str(v).strip() for v in candidate.values() if str(v).strip()]
+                    break
+    elif filename.endswith('.csv'):
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            first = line.split(',', 1)[0].strip().strip('"').strip("'")
+            if first:
+                items.append(first)
+    else:
+        for line in text.splitlines():
+            line = line.strip()
+            if line and not line.startswith('#'):
+                items.append(line)
+    seen = set()
+    result = []
+    for item in items:
+        item = str(item).strip()
+        if item and item not in seen:
+            seen.add(item)
+            result.append(item)
+    return result
+
+
+def _save_model_preset_from_import(f) -> str:
+    """导入预设参数文件到 PRESETS_DIR，返回安全预设名；不可用返回空字符串。"""
+    if f is None or not f.filename:
+        return ''
+    try:
+        raw = f.read()
+        data = json.loads(raw)
+    except Exception:
+        return ''
+    if not isinstance(data, dict):
+        return ''
+    name = str(data.get('name') or Path(f.filename).stem or 'imported')
+    safe = re.sub('[^\\w\\-]', '_', name)[:64]
+    d = Path(PRESETS_DIR)
+    d.mkdir(parents=True, exist_ok=True)
+    (d / (safe + '.json')).write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
+    return safe
+
+
 # -- 模型 --
 @app.get('/api/models')
 def list_models():
@@ -1463,13 +1655,14 @@ def list_models():
             'output_count': record.get('output_count'),
             'class_count': record.get('class_count'),
             'class_names': record.get('class_names') or [],
-            'rknn_concurrency': record.get('rknn_concurrency', 1),
+            'rknn_concurrency': _effective_rknn_concurrency(record),
             'selected': bool(record.get('selected')),
             'running': bool(record.get('running')),
             'metadata': record.get('metadata') or {},
         })
+    merged_models = [_merge_model_ui_meta(m) for m in models]
     return jsonify({'ok': True, 'data': {
-        'models': models,
+        'models': merged_models,
         'selected_model_id': data.get('selected_model_id', ''),
         'running_model_id': data.get('running_model_id', ''),
         'state': data.get('state', 'unknown'),
@@ -1478,14 +1671,14 @@ def list_models():
 
 
 # ---------------------------------------------------------------------------
-# 模型转换（ONNX → RKNN，对齐 YU 真机转换链）
+# 模型转换（ONNX → RKNN，使用 TTBOX 自有转换链，不依赖 YU /opt/aiassistance）
 #
-# 行为基准 = YU 真机实测（2026-09-06 取证）：
-#   - 转换器: /opt/aiassistance/Python/convert_onnx_to_rknn.py
-#   - venv:   /home/orangepi/aiassistance-rknn/venv（rknn-toolkit2 2.3.2）
+# 行为基准 = TTBOX 板端实测：
+#   - 转换器: /opt/ttbox/tools/converter/convert_onnx_to_rknn.py
+#   - venv:   /opt/ttbox/venv-convert（rknn-toolkit2 2.3.2）
 #   - INT8 asymmetric_quantized-8, mean 0/0/0, std 255/255/255
 #   - 输出布局 auto（raw6 → raw9 → yolo26 → raw3 → graph），失败自动重试
-#   - 校准图: 用户上传 zip，缺省用 YU 内置 209 张通用图
+#   - 校准图: 用户上传 zip，缺省用 /opt/ttbox/calib/imgs
 #   - 同一时间只允许一个转换（互斥）
 # 转换任务状态: idle / converting / success / failed
 # 转换产物不直接进模型库：统一走 MODEL_IMPORT → MODEL_VALIDATE → MODEL_INSTALL。
@@ -1495,11 +1688,11 @@ _CONVERT_STATE = {'state': 'idle', 'error': '', 'model_id': '', 'started_at': 0.
 _CONVERT_LOCK = threading.Lock()
 _CONVERT_WORKDIR = Path(os.environ.get('TTBOX_CONVERT_WORKDIR', '/tmp/ttbox_onnx_convert'))
 _CONVERTER_SCRIPT = os.environ.get('TTBOX_CONVERTER_SCRIPT',
-                                   '/opt/aiassistance/Python/convert_onnx_to_rknn.py')
+                                   '/opt/ttbox/tools/converter/convert_onnx_to_rknn.py')
 _CONVERTER_PYTHON = os.environ.get('TTBOX_CONVERTER_PYTHON',
-                                   '/home/orangepi/aiassistance-rknn/venv/bin/python')
+                                   '/opt/ttbox/venv-convert/bin/python')
 _CONVERT_CALIB_DIR = os.environ.get('TTBOX_CONVERT_CALIB_DIR',
-                                    '/opt/aiassistance/test_images/General')
+                                    '/opt/ttbox/calib/imgs')
 
 
 def _convert_state_public() -> dict:
@@ -1507,12 +1700,15 @@ def _convert_state_public() -> dict:
             ('state', 'error', 'model_id', 'started_at', 'finished_at', 'message')}
 
 
-def _run_onnx_conversion(onnx_path: Path, output_path: Path, log_lines: list) -> bool:
+def _run_onnx_conversion(onnx_path: Path, output_path: Path, log_lines: list,
+                         dataset_root: str = '') -> bool:
     """调用 YU 对齐转换器。成功返回 True；失败按 YU 行为自动重试一次（graph 布局降级）。"""
+    if not dataset_root:
+        dataset_root = _CONVERT_CALIB_DIR
     cmd = [
         _CONVERTER_PYTHON, _CONVERTER_SCRIPT,
         '--onnx', str(onnx_path),
-        '--dataset-root', _CONVERT_CALIB_DIR,
+        '--dataset-root', dataset_root,
         '--dataset-count', '5',                      # YU 实测：缺省 5 张 evenly sample
         '--target-platform', 'rk3588',
         '--output', str(output_path),
@@ -1531,16 +1727,40 @@ def _run_onnx_conversion(onnx_path: Path, output_path: Path, log_lines: list) ->
     return False
 
 
-def _conversion_worker(onnx_tmp: Path, calib_tmp, model_id: str, label: str) -> None:
+def _conversion_worker(onnx_tmp: Path, calib_tmp, model_id: str, label: str,
+                       extra_meta: dict | None = None) -> None:
     """转换线程：ONNX → RKNN → 统一入库（与 RKNN 直接上传同一条 import→validate→install 路）。"""
     work = _CONVERT_WORKDIR / model_id
+    logs: list[str] = []
     try:
         work.mkdir(parents=True, exist_ok=True)
         onnx_src = work / 'source.onnx'
         onnx_tmp.replace(onnx_src)
         rknn_out = work / (model_id + '_raw_int8_rk3588.rknn')
-        if not _run_onnx_conversion(onnx_src, rknn_out, []):
-            _CONVERT_STATE.update(state='failed', error='ONNX 转换失败（已自动重试一次）',
+        dataset_root = _CONVERT_CALIB_DIR
+        calib_dir = None
+        if calib_tmp is not None and calib_tmp.exists():
+            calib_dir = work / 'calib'
+            calib_dir.mkdir(parents=True, exist_ok=True)
+            try:
+                with zipfile.ZipFile(calib_tmp, 'r') as zf:
+                    zf.extractall(calib_dir)
+                if any(p.is_file() and p.suffix.lower() in
+                       {'.jpg', '.jpeg', '.png', '.bmp', '.webp'}
+                       for p in calib_dir.rglob('*')):
+                    dataset_root = str(calib_dir)
+                else:
+                    calib_dir = None
+                    dataset_root = _CONVERT_CALIB_DIR
+            except (zipfile.BadZipFile, OSError) as exc:
+                calib_dir = None
+                dataset_root = _CONVERT_CALIB_DIR
+                print(f'calibration zip extract failed, fallback default: {exc}', file=sys.stderr)
+        if not _run_onnx_conversion(onnx_src, rknn_out, logs, dataset_root=dataset_root):
+            detail = (logs[-1] if logs else '').strip()[-300:]
+            _CONVERT_STATE.update(state='failed',
+                                  error=('ONNX 转换失败（已自动重试一次）' +
+                                         (f'：{detail}' if detail else '')),
                                   finished_at=time.time())
             return
         inc = Path('/opt/ttbox/models/_incoming')
@@ -1566,6 +1786,11 @@ def _conversion_worker(onnx_tmp: Path, calib_tmp, model_id: str, label: str) -> 
             _CONVERT_STATE.update(state='failed', error=r3.get('error', '安装失败'),
                                   finished_at=time.time())
             return
+        if extra_meta:
+            try:
+                _write_model_ui_meta(model_id, extra_meta)
+            except Exception:
+                pass
         _CONVERT_STATE.update(state='success', error='', finished_at=time.time(),
                               message='ONNX 已转换并入库')
     except Exception as exc:  # 转换线程兜底：任何异常都必须落到 failed 状态
@@ -1595,6 +1820,19 @@ def import_onnx():
         stem = re.sub(r'\.onnx$', '', f.filename, flags=re.I)
         model_id = re.sub(r'[^A-Za-z0-9_\-]', '_', stem)[:64].strip('_') or 'model'
         label = stem.strip() or model_id
+        extra_meta = {}
+        class_names = _parse_model_labels_file(request.files.get('labels_file'))
+        preset_name = _save_model_preset_from_import(request.files.get('preset_file'))
+        if class_names:
+            extra_meta['class_names'] = class_names
+        if preset_name:
+            extra_meta['preset_name'] = preset_name
+        game_profile = str(request.form.get('game_profile') or '').strip() or 'generic'
+        if game_profile != 'generic':
+            extra_meta['game_profile'] = game_profile
+        description = str(request.form.get('description') or '').strip()
+        if description:
+            extra_meta['description'] = description
         _CONVERT_WORKDIR.mkdir(parents=True, exist_ok=True)
         onnx_tmp = _CONVERT_WORKDIR / ('upload_%d.onnx' % int(time.time() * 1000))
         f.save(str(onnx_tmp))
@@ -1610,7 +1848,7 @@ def import_onnx():
                               started_at=time.time(), finished_at=0.0,
                               message='正在导入并转换')
         threading.Thread(target=_conversion_worker,
-                         args=(onnx_tmp, calib_tmp, model_id, label),
+                         args=(onnx_tmp, calib_tmp, model_id, label, extra_meta),
                          daemon=True).start()
     return jsonify({'ok': True, 'data': {'message': '已开始转换', 'model_id': model_id}})
 
@@ -1656,6 +1894,8 @@ def import_model():
     if f is None or not f.filename:
         return jsonify({'ok': False, 'error': 'missing upload field: file'})
     fname = f.filename
+    class_names = _parse_model_labels_file(request.files.get('labels_file'))
+    preset_name = _save_model_preset_from_import(request.files.get('preset_file'))
     # Windows 本地环境（TTBOX_ALLOW_ONNX=1）允许 .onnx 直入（无 RKNN 转换链）；
     # 板端保持 .rknn 单一入口，行为不变。
     allow_onnx = os.environ.get('TTBOX_ALLOW_ONNX', '') == '1'
@@ -1687,6 +1927,22 @@ def import_model():
     r3 = ipc_request('MODEL_INSTALL', {'model_id': model_id})
     if r3.get('status') != 0:
         return jsonify({'ok': False, 'error': r3.get('error', '安装失败')})
+    ui_meta = {}
+    if class_names:
+        ui_meta['class_names'] = class_names
+    if preset_name:
+        ui_meta['preset_name'] = preset_name
+    game_profile = str(request.form.get('game_profile') or '').strip() or 'generic'
+    if game_profile != 'generic':
+        ui_meta['game_profile'] = game_profile
+    description = str(request.form.get('description') or '').strip()
+    if description:
+        ui_meta['description'] = description
+    if ui_meta:
+        try:
+            _write_model_ui_meta(model_id, ui_meta)
+        except Exception:
+            pass
     return jsonify({'ok': True, 'data': {'message': '导入成功', 'model_id': model_id}})
 
 
@@ -1730,7 +1986,13 @@ def bind_model_preset():
     body = request.get_json(silent=True) or {}
     if not body.get('model_id'):
         return jsonify({'ok': False, 'error': 'model_id is required'}), 400
-    return jsonify({'ok': False, 'error': 'ModelRegistry 暂未提供 manifest 扩展字段写入接口'}), 501
+    model_id = str(body.get('model_id') or '').strip()
+    preset_name = str(body.get('preset_name') or '').strip()
+    r = _models_patch_response(model_id, {'preset_name': preset_name})
+    if r is None:
+        return jsonify({'ok': False, 'error': '模型不存在或不可用'}), 404
+    r['data']['model'] = {'preset_name': preset_name}
+    return jsonify(r)
 
 
 @app.post('/api/models/game-profile')
@@ -1738,7 +2000,13 @@ def update_model_game_profile():
     body = request.get_json(silent=True) or {}
     if not body.get('model_id'):
         return jsonify({'ok': False, 'error': 'model_id is required'}), 400
-    return jsonify({'ok': False, 'error': 'ModelRegistry 暂未提供 manifest 扩展字段写入接口'}), 501
+    model_id = str(body.get('model_id') or '').strip()
+    game_profile = str(body.get('game_profile') or 'generic').strip() or 'generic'
+    r = _models_patch_response(model_id, {'game_profile': game_profile})
+    if r is None:
+        return jsonify({'ok': False, 'error': '模型不存在或不可用'}), 404
+    r['data']['message'] = '游戏配置已保存'
+    return jsonify(r)
 
 
 @app.post('/api/models/remote-frame-format')
@@ -1746,7 +2014,15 @@ def update_model_remote_frame_format():
     body = request.get_json(silent=True) or {}
     if not body.get('model_id', ''):
         return jsonify({'ok': False, 'error': 'model_id is required'})
-    return jsonify({'ok': True, 'data': {'message': '已更新'}})
+    model_id = str(body.get('model_id') or '').strip()
+    fmt = str(body.get('remote_frame_format') or 'jpeg').strip().lower()
+    if fmt not in ('jpeg', 'nv12', 'h264'):
+        fmt = 'jpeg'
+    r = _models_patch_response(model_id, {'remote_frame_format': fmt})
+    if r is None:
+        return jsonify({'ok': False, 'error': '模型不存在或不可用'}), 404
+    r['data']['message'] = '帧格式已保存'
+    return jsonify(r)
 
 
 @app.post('/api/models/rknn-concurrency')
@@ -1754,7 +2030,33 @@ def update_model_rknn_concurrency():
     body = request.get_json(silent=True) or {}
     if not body.get('model_id'):
         return jsonify({'ok': False, 'error': 'model_id is required'}), 400
-    return jsonify({'ok': False, 'error': '模型并发配置需通过 RuntimeConfig 专用接口接入'}), 501
+    raw_count = body.get('count', body.get('rknn_concurrency'))
+    try:
+        count = int(raw_count)
+    except (TypeError, ValueError):
+        return jsonify({'ok': False, 'error': 'count 必须是 1~3 的整数'}), 400
+    if count < 1 or count > 3:
+        return jsonify({'ok': False, 'error': 'count 必须在 1~3 之间'}), 400
+    r = ipc_request('MODEL_SET_CONCURRENCY', {
+        'model_id': body['model_id'],
+        'count': count,
+    })
+    if r.get('status') != 0:
+        return jsonify({'ok': False, 'error': r.get('error', '设置并发失败')}), 409
+    models_resp = list_models()
+    models_data = {}
+    if models_resp is not None:
+        try:
+            models_data = models_resp.get_json() or {}
+        except Exception:
+            models_data = {}
+    return jsonify({'ok': True, 'data': {
+        'message': '并发已保存并生效',
+        'model_id': body['model_id'],
+        'rknn_concurrency': count,
+        'restart_required': False,
+        **(models_data.get('data') or {}),
+    }})
 
 
 @app.post('/api/models/hailo-pipeline-depth')
@@ -1762,7 +2064,16 @@ def update_model_hailo_pipeline_depth():
     body = request.get_json(silent=True) or {}
     if not body.get('model_id', ''):
         return jsonify({'ok': False, 'error': 'model_id is required'})
-    return jsonify({'ok': True, 'data': {'message': '已更新'}})
+    model_id = str(body.get('model_id') or '').strip()
+    try:
+        depth = max(1, min(4, int(body.get('hailo_pipeline_depth') or 3)))
+    except (TypeError, ValueError):
+        depth = 3
+    r = _models_patch_response(model_id, {'hailo_pipeline_depth': depth})
+    if r is None:
+        return jsonify({'ok': False, 'error': '模型不存在或不可用'}), 404
+    r['data']['message'] = '流水线深度已保存'
+    return jsonify(r)
 
 
 @app.post('/api/models/class-names')
@@ -1770,7 +2081,16 @@ def update_model_class_names():
     body = request.get_json(silent=True) or {}
     if not body.get('model_id'):
         return jsonify({'ok': False, 'error': 'model_id is required'}), 400
-    return jsonify({'ok': False, 'error': 'ModelRegistry 暂未提供 metadata 写入接口'}), 501
+    model_id = str(body.get('model_id') or '').strip()
+    class_names = body.get('class_names')
+    if not isinstance(class_names, list):
+        return jsonify({'ok': False, 'error': 'class_names 必须是数组'}), 400
+    clean = [str(n).strip() for n in class_names if str(n).strip()]
+    r = _models_patch_response(model_id, {'class_names': clean})
+    if r is None:
+        return jsonify({'ok': False, 'error': '模型不存在或不可用'}), 404
+    r['data']['message'] = '类别名称已保存'
+    return jsonify(r)
 
 
 # -- 预设 --
@@ -3016,12 +3336,22 @@ def update_display_hardware():
                 else:
                     continue  # 空/auto 不覆盖
             cur[k] = cfg_in[k]
+    # hardware_display.device 表示 HDMI-RX 输入设备，不能接受 DRM 输出节点。
+    # auto/空值统一落为真实 V4L2 节点，避免界面显示与 EDID 实际注入路径漂移。
+    requested_device = str(cur.get('device', 'auto') or 'auto').strip()
+    if requested_device == 'auto' or not requested_device:
+        cur['device'] = '/dev/video0'
+    elif requested_device.startswith('/dev/dri/') or 'card' in requested_device or 'renderD' in requested_device:
+        return jsonify({'ok': False, 'error': 'HDMI-RX 输入必须使用 /dev/video0，/dev/dri/card0 仅用于 loopout'}), 400
     json.dump(cur, open(cpath, 'w'), indent=2, ensure_ascii=False)
 
     result = {}
     if apply_now:
+        apply_env = dict(os.environ)
+        apply_env['TTBOX_EDID_REHANDSHAKE'] = '1'
+        apply_env['TTBOX_EDID_REHANDSHAKE_ATTEMPTS'] = '6'
         r = subprocess.run(['bash', '/opt/ttbox/scripts/edid/edid_apply.sh'],
-                           capture_output=True, text=True, timeout=60)
+                           capture_output=True, text=True, timeout=60, env=apply_env)
         result = {'exit': r.returncode, 'output': (r.stdout + r.stderr).strip()[-500:]}
         if r.returncode != 0:
             return jsonify({'ok': False, 'error': f'EDID 应用失败: {r.stderr or r.stdout}'[-300:]})
@@ -3159,18 +3489,18 @@ def _license_payload() -> dict:
     }
     ui = {
         'allow_theme_switch': True,
-        'app_title': 'YU 控制台',
-        'brand_eyebrow': 'AIASSISTANCE',
-        'brand_mark': 'AI',
-        'brand_name': 'YU',
-        'brand_title': 'YU 控制台',
+        'app_title': 'TTBOX 控制台',
+        'brand_eyebrow': 'TTBOX',
+        'brand_mark': 'TT',
+        'brand_name': 'TTBOX',
+        'brand_title': 'TTBOX 控制台',
         'default_hotspot_ssid': 'TTBOX',  # 真实热点名（wifi_manager DEFAULT_SSID=TTBOX）
         'default_local_name': 'aiassistance',
         'default_theme': 'dark',
-        'ui_brand': 'yu',
+        'ui_brand': 'ttbox',
     }
     core_version = '2026.05.16'
-    app_version = '2026.08.03.1'
+    app_version = TTBOX_APP_VERSION
     return {
         'app_version': app_version,
         'auto_start': _auto_start_payload(),
@@ -3187,7 +3517,7 @@ def _license_payload() -> dict:
         },
         'license': license_data,
         'ui': ui,
-        'ui_brand': 'yu',
+        'ui_brand': 'ttbox',
         'version': app_version,
     }
 

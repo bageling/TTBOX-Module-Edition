@@ -20,6 +20,7 @@ import struct
 import subprocess
 import sys
 import threading
+import zipfile
 import time
 from http import HTTPStatus
 from pathlib import Path
@@ -38,6 +39,7 @@ from ttbox_motion.calibration import (
     CalibrationObservation,
     CalibrationSession,
     CalibrationState,
+    derive_pid_params,
     fit_axis_measurements,
 )
 
@@ -70,6 +72,8 @@ DEFAULT_LICENSE = {
     'activated': True, 'valid': True, 'mode': 'ttbox',
     'status': 'valid', 'message': '',
 }
+
+TTBOX_APP_VERSION = '2026.08.03.1'
 
 
 # ====================================================================
@@ -255,17 +259,33 @@ def collect_network_summary() -> dict:
 # IPC 通信
 # ====================================================================
 def ipc_request(req_type: str, params: dict | None = None, timeout: float = 5) -> dict:
-    """向 TTBOX Core IPC 发送请求，返回解析后的响应。"""
+    """向 TTBOX Core IPC 发送请求，返回解析后的响应。
+
+    传输层（按 IPC_SOCKET 形态自动选择，协议一致）：
+      - /path/to.sock  → Unix domain socket（板端）
+      - tcp://host:port / host:port → TCP（Windows 本地 win_core_main）
+    """
     payload = {'type': req_type}
     if params is not None:
         payload['params'] = params
+    sock_spec = os.environ.get('TTBOX_IPC_TCP', '')
+    use_tcp = IPC_SOCKET.startswith('tcp:') or sock_spec
     try:
-        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    except (AttributeError, OSError):
-        return {'status': 3, 'error': '当前环境不支持 Unix socket（板端专用）'}
+        if use_tcp:
+            spec = sock_spec or IPC_SOCKET.removeprefix('tcp:')
+            host, _, port = spec.rpartition(':')
+            if not host:
+                host = '127.0.0.1'
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            target = (host, int(port))
+        else:
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            target = IPC_SOCKET
+    except (AttributeError, OSError) as e:
+        return {'status': 3, 'error': f'IPC socket 创建失败（{use_tcp and "TCP" or "Unix"}）: {e}'}
     s.settimeout(timeout)
     try:
-        s.connect(IPC_SOCKET)
+        s.connect(target if use_tcp else IPC_SOCKET)
         s.sendall(json.dumps(payload).encode() + b'\n')
         buf = b''
         while b'\n' not in buf:
@@ -372,7 +392,6 @@ def _bits_to_hotkey(v):
 # controller 内的数值/布尔直通字段（YU key → mouse key）
 CONTROLLER_NUMS = {
     'kp_x': 'kp_x', 'kp_y': 'kp_y',
-    'ki_x': 'ki_x', 'ki_y': 'ki_y',
     'kd_x': 'kd_x', 'kd_y': 'kd_y',
     'predict_x': 'predict_x', 'predict_y': 'predict_y',
     'rate_x': 'rate_x', 'rate_y': 'rate_y',
@@ -381,16 +400,14 @@ CONTROLLER_NUMS = {
     'selector_lost_grace_ms': 'lost_grace_ms',
     'aim_reference_offset_x': 'aim_offset_x',
     'aim_reference_offset_y': 'aim_offset_y',
-    'y_axis_fire_release_delay_sec': 'y_axis_fire_release_delay_sec',
 }
 # controller 内的布尔直通字段
 CONTROLLER_BOOLS = {
-    'aim_fire_lock_y': 'aim_fire_lock_y',
-    'block_physical_mouse_x_while_aiming': 'block_physical_x',
-    'block_physical_mouse_y_while_aiming': 'block_physical_y',
-    'continuous_lead_enabled': '_cl_enabled',
     'pull_curve_enabled': '_pc_enabled',
     'humanize_enabled': '_hz_enabled',
+    'personal_trajectory_enabled': '_pt_enabled',
+    'lock_confirm_instant_enter_enabled': '_lc_inst_enter_enabled',
+    'head_aim_enabled': '_ha_enabled',
 }
 
 
@@ -408,11 +425,8 @@ def yu_body_to_profile(body: dict) -> dict:
             if tk.startswith('_'):
                 continue  # 嵌套结构开关，下面统一处理
             mouse[tk] = bool(ctrl[yk])
-    # 热键：字符串 → 位掩码
-    if ctrl.get('y_axis_fire_hotkey') is not None:
-        mouse['y_axis_fire_hotkey'] = _hotkey_to_bits(ctrl['y_axis_fire_hotkey'], 1)
 
-    # 2) 插件结构（pull_curve / continuous_lead / humanize）
+    # 2) 插件结构（pull_curve / personal_trajectory / lock_confirm / head_aim / personal_motion）
     pull_curve: dict = {}
     if ctrl.get('pull_curve_enabled') is not None:
         pull_curve['enabled'] = bool(ctrl['pull_curve_enabled'])
@@ -424,18 +438,75 @@ def yu_body_to_profile(body: dict) -> dict:
     if pull_curve:
         mouse['pull_curve'] = pull_curve
 
-    continuous_lead: dict = {}
-    if ctrl.get('continuous_lead_enabled') is not None:
-        continuous_lead['enabled'] = bool(ctrl['continuous_lead_enabled'])
-    for yk, tk in [('continuous_lead_enter_distance', 'enter_distance'),
-                   ('continuous_lead_scale', 'scale'),
-                   ('continuous_lead_fade_in_ms', 'fade_in_ms'),
-                   ('continuous_lead_fade_out_ms', 'fade_out_ms'),
-                   ('continuous_lead_near_disable_ratio', 'near_disable_ratio')]:
+    # 拟人化整形（第1项）—— mouse.personal_trajectory.*
+    personal_traj = {}
+    if ctrl.get('personal_trajectory_enabled') is not None:
+        personal_traj['enabled'] = bool(ctrl['personal_trajectory_enabled'])
+    for yk, tk in [('personal_trajectory_speed_scale', 'speed_scale'),
+                   ('personal_trajectory_stability_scale', 'stability_scale'),
+                   ('personal_trajectory_variation_scale', 'variation_scale'),
+                   ('personal_trajectory_jitter_amp_px', 'jitter_amp_px'),
+                   ('personal_trajectory_fitts_intercept_ms', 'fitts_intercept_ms'),
+                   ('personal_trajectory_fitts_slope_ms_per_bit', 'fitts_slope_ms_per_bit')]:
         if ctrl.get(yk) is not None:
-            continuous_lead[tk] = ctrl[yk]
-    if continuous_lead:
-        mouse['continuous_lead'] = continuous_lead
+            personal_traj[tk] = ctrl[yk]
+    if personal_traj:
+        mouse['personal_trajectory'] = personal_traj
+
+    # 目标锁定确认（第2项）—— mouse.lock_confirm.*
+    lock_confirm = {}
+    if ctrl.get('lock_confirm_instant_enter_enabled') is not None:
+        lock_confirm['instant_enter_enabled'] = bool(ctrl['lock_confirm_instant_enter_enabled'])
+    for yk, tk in [('lock_confirm_confirmation_frames', 'confirmation_frames'),
+                   ('lock_confirm_enter_conf', 'enter_conf'),
+                   ('lock_confirm_hold_conf', 'hold_conf'),
+                   ('lock_confirm_instant_enter_dist', 'instant_enter_dist'),
+                   ('lock_confirm_instant_enter_conf', 'instant_enter_conf')]:
+        if ctrl.get(yk) is not None:
+            lock_confirm[tk] = ctrl[yk]
+    if lock_confirm:
+        mouse['lock_confirm'] = lock_confirm
+
+    # 压枪（recoil）—— mouse.recoil.*（YU 压枪 12 参数语义，基于 TTBOX 输出链）
+    # YU 前端提交在 body 顶层 recoil 块；hotkey 为字符串（'left'/'right'/''）→ 位掩码，
+    # hotkey_mode：'all'/'any' → 2/1
+    rk = body.get('recoil') or {}
+    recoil = {}
+    if rk.get('enabled') is not None:
+        recoil['enabled'] = bool(rk['enabled'])
+    if rk.get('hotkey') is not None:
+        recoil['hotkey'] = _hotkey_to_bits(rk['hotkey'], 1) or 1
+    if rk.get('hotkey2') is not None:
+        recoil['hotkey2'] = _hotkey_to_bits(rk['hotkey2'], 0)
+    if rk.get('hotkey_mode') is not None:
+        recoil['hotkey_mode'] = 2 if str(rk['hotkey_mode']) == 'all' else 1
+    for yk, tk in [('only_when_target_visible', 'only_when_target_visible'),
+                   ('target_lost_release_ms', 'target_lost_release_ms'),
+                   ('trigger_delay_enabled', 'trigger_delay_enabled'),
+                   ('trigger_delay_ms', 'trigger_delay_ms'),
+                   ('strength', 'strength'),
+                   ('speed', 'speed'),
+                   ('humanize_enabled', 'humanize_enabled'),
+                   ('humanize_curve_strength', 'humanize_curve_strength'),
+                   ('humanize_jitter_px', 'humanize_jitter_px'),
+                   ('humanize_jitter_frequency', 'humanize_jitter_frequency')]:
+        if rk.get(yk) is not None:
+            recoil[tk] = rk[yk]
+    if recoil:
+        mouse['recoil'] = recoil
+
+    # 头部瞄准约束（第3项）—— mouse.head_aim.*
+    head_aim = {}
+    if ctrl.get('head_aim_enabled') is not None:
+        head_aim['enabled'] = bool(ctrl['head_aim_enabled'])
+    for yk, tk in [('head_aim_head_offset_top_fraction', 'head_offset_top_fraction'),
+                   ('head_aim_head_height_fraction', 'head_height_fraction'),
+                   ('head_aim_safe_inset_fraction', 'safe_inset_fraction'),
+                   ('head_aim_max_lag_px', 'max_lag_px')]:
+        if ctrl.get(yk) is not None:
+            head_aim[tk] = ctrl[yk]
+    if head_aim:
+        mouse['head_aim'] = head_aim
 
     # 3) 个人移动曲线：TTBOX 自己的 RuntimeProfile 结构
     personal_motion = {}
@@ -559,7 +630,6 @@ def profile_to_yu(prof: dict) -> dict:
         'offset_y': mouse.get('offset_y', 0.5),
     }
     pc = mouse.get('pull_curve') or {}
-    cl = mouse.get('continuous_lead') or {}
     hz = mouse.get('humanize') or {}
     fov_p = prof.get('fov') or {}
     prev_p = prof.get('preview') or {}
@@ -567,9 +637,12 @@ def profile_to_yu(prof: dict) -> dict:
     cap = prof.get('capture') or {}
 
     personal_motion = mouse.get('personal_motion') or {}
+    personal_traj = mouse.get('personal_trajectory') or {}
+    lock_confirm = mouse.get('lock_confirm') or {}
+    head_aim = mouse.get('head_aim') or {}
+    recoil = mouse.get('recoil') or {}
     ctrl = {
         'kp_x': mouse.get('kp_x'), 'kp_y': mouse.get('kp_y'),
-        'ki_x': mouse.get('ki_x'), 'ki_y': mouse.get('ki_y'),
         'kd_x': mouse.get('kd_x'), 'kd_y': mouse.get('kd_y'),
         'predict_x': mouse.get('predict_x'), 'predict_y': mouse.get('predict_y'),
         'rate_x': mouse.get('rate_x'), 'rate_y': mouse.get('rate_y'),
@@ -578,26 +651,33 @@ def profile_to_yu(prof: dict) -> dict:
         'selector_lost_grace_ms': mouse.get('lost_grace_ms'),
         'aim_reference_offset_x': mouse.get('aim_offset_x'),
         'aim_reference_offset_y': mouse.get('aim_offset_y'),
-        'aim_fire_lock_y': mouse.get('aim_fire_lock_y', False),
-        'block_physical_mouse_x_while_aiming': mouse.get('block_physical_x', False),
-        'block_physical_mouse_y_while_aiming': mouse.get('block_physical_y', False),
-        'y_axis_fire_hotkey': _bits_to_hotkey(mouse.get('y_axis_fire_hotkey', 1)) or 'left',
-        'y_axis_fire_release_delay_sec': mouse.get('y_axis_fire_release_delay_sec', 0.3),
         'pull_curve_enabled': pc.get('enabled', True),
         'pull_curve_strength': pc.get('strength', 0.8),
         'pull_curve_jitter_px': pc.get('jitter_px', 3.0),
         'pull_curve_min_distance': pc.get('min_distance', 80),
-        'continuous_lead_enabled': cl.get('enabled', False),
-        'continuous_lead_enter_distance': cl.get('enter_distance', 150),
-        'continuous_lead_scale': cl.get('scale', 0.5),
-        'continuous_lead_fade_in_ms': cl.get('fade_in_ms', 300),
-        'continuous_lead_fade_out_ms': cl.get('fade_out_ms', 300),
-        'continuous_lead_near_disable_ratio': cl.get('near_disable_ratio', 0.66),
         'humanize_enabled': hz.get('enabled', True),
         'humanize_curve_strength': hz.get('curve_strength', 0.45),
         'humanize_jitter_px': hz.get('jitter_px', 0.25),
         'humanize_jitter_frequency': hz.get('jitter_frequency', 8),
         'selector_search_radius': mouse.get('selector_search_radius', 170),
+        'personal_trajectory_enabled': personal_traj.get('enabled', False),
+        'personal_trajectory_speed_scale': personal_traj.get('speed_scale', 1.0),
+        'personal_trajectory_stability_scale': personal_traj.get('stability_scale', 1.0),
+        'personal_trajectory_variation_scale': personal_traj.get('variation_scale', 1.0),
+        'personal_trajectory_jitter_amp_px': personal_traj.get('jitter_amp_px', 0.20),
+        'personal_trajectory_fitts_intercept_ms': personal_traj.get('fitts_intercept_ms', 120),
+        'personal_trajectory_fitts_slope_ms_per_bit': personal_traj.get('fitts_slope_ms_per_bit', 85),
+        'lock_confirm_confirmation_frames': lock_confirm.get('confirmation_frames', 1),
+        'lock_confirm_enter_conf': lock_confirm.get('enter_conf', 0.0),
+        'lock_confirm_hold_conf': lock_confirm.get('hold_conf', 0.0),
+        'lock_confirm_instant_enter_enabled': lock_confirm.get('instant_enter_enabled', True),
+        'lock_confirm_instant_enter_dist': lock_confirm.get('instant_enter_dist', 105.0),
+        'lock_confirm_instant_enter_conf': lock_confirm.get('instant_enter_conf', 0.5),
+        'head_aim_enabled': head_aim.get('enabled', False),
+        'head_aim_head_offset_top_fraction': head_aim.get('head_offset_top_fraction', 0.04),
+        'head_aim_head_height_fraction': head_aim.get('head_height_fraction', 0.28),
+        'head_aim_safe_inset_fraction': head_aim.get('safe_inset_fraction', 0.12),
+        'head_aim_max_lag_px': head_aim.get('max_lag_px', 1.25),
         'personal_motion_enabled': personal_motion.get('enabled', False),
         'personal_motion_curve_blend': personal_motion.get('curve_blend', 1.0),
         'personal_motion_speed_blend': personal_motion.get('speed_blend', 1.0),
@@ -640,10 +720,25 @@ def profile_to_yu(prof: dict) -> dict:
             'class_offsets': mouse.get('class_offsets', []),
             'offset_switch_enabled': False, 'offset_switch_hotkey': '',
         }],
-        'recoil': {}, 'rapid_fire': {}, 'auto_back_flick': {}, 'crosshair': {},
+        'recoil': {
+            'enabled': recoil.get('enabled', False),
+            'only_when_target_visible': recoil.get('only_when_target_visible', True),
+            'target_lost_release_ms': recoil.get('target_lost_release_ms', 200),
+            'hotkey': _bits_to_hotkey(recoil.get('hotkey', 1)) or 'left',
+            'hotkey2': _bits_to_hotkey(recoil.get('hotkey2', 0)),
+            'hotkey_mode': 'all' if recoil.get('hotkey_mode') == 2 else 'any',
+            'trigger_delay_enabled': recoil.get('trigger_delay_enabled', False),
+            'trigger_delay_ms': recoil.get('trigger_delay_ms', 120),
+            'strength': recoil.get('strength', 0),
+            'speed': recoil.get('speed', 1),
+            'humanize_enabled': recoil.get('humanize_enabled', True),
+            'humanize_curve_strength': recoil.get('humanize_curve_strength', 0.45),
+            'humanize_jitter_px': recoil.get('humanize_jitter_px', 0.25),
+            'humanize_jitter_frequency': recoil.get('humanize_jitter_frequency', 8.0),
+        }, 'rapid_fire': {}, 'auto_back_flick': {}, 'crosshair': {},
         'auto_trigger': {'enabled': False, 'profiles': []},
         'hotkey_guard': {'enabled': False, 'toggle_hotkey': 'middle'},
-        'mouse_output': {'mode': 'passthrough'},
+        'mouse_output': {'mode': 'full_passthrough'},
         'latency': lat, 'fan_control': {}, 'loopout_overlay': {},
     }
 
@@ -693,24 +788,39 @@ def collect_yu_state() -> dict:
             'output_count': mm.get('output_count', 0),
             'class_count': mm.get('class_count', 0),
             'class_names': mm.get('class_names') or [],
-            'rknn_concurrency': mm.get('rknn_concurrency', 1),
+            'rknn_concurrency': _effective_rknn_concurrency(mm),
         })
-    active_model = ml_data.get('active', '')
+    models = [_merge_model_ui_meta(m) for m in models]
+    active_model = registry_active or prof.get('model_id', '') or ''
 
     m = st.get('metrics', {})
     # config 回读直接复用 profile_to_yu（单一真源，避免两处翻译漂移）
     config_yu = profile_to_yu(prof)
     running = bool(st.get('running')) and bool(st.get('runtime_running'))
+    capture_fps = float(m.get('capture_fps') or 0.0)
+    input_width = int(m.get('input_width') or 0)
+    input_height = int(m.get('input_height') or 0)
+    # CoreRuntime 的真实指标没有 infer_total/last_frame 这两个旧字段。
+    # HDMI 是否恢复只看采集 FPS 和有效输入尺寸，避免有帧时仍错误显示 degraded。
+    degraded = running and (capture_fps <= 0.0 or input_width <= 0 or input_height <= 0)
+    last_frame = int(m.get('last_frame') or 0)
+    runtime_status = 'degraded' if degraded else ('running' if running else 'stopped')
+    runtime_error = m.get('last_error') or ('HDMI 输入未锁定或尚未收到帧' if degraded else '')
 
     return {
         'ok': True,
         'data': {
-            'app_version': str(st.get('version', '2026.08.03.1')) or '2026.08.03.1',
-            'version': str(st.get('version', '2026.08.03.1')) or '2026.08.03.1',
+            'app_version': str(st.get('version', TTBOX_APP_VERSION)) or TTBOX_APP_VERSION,
+            'version': str(st.get('version', TTBOX_APP_VERSION)) or TTBOX_APP_VERSION,
             'config': config_yu,
             'auto_start': _auto_start_payload(),
+            # 预览流健康：前端据此在服务重启/断线后自动重建 MJPEG 连接（防卡框冻结）
+            'preview': {
+                'alive': (time.time() - _PREVIEW_MONITOR['last_frame_ts']) < 2.5,
+                'active_conns': _PREVIEW_MONITOR['active_conns'],
+            },
             'models': models,  # YU 同构：数组
-            'selected_model_id': registry_active or active_model,
+            'selected_model_id': active_model,
             'presets': sorted(Path(PRESETS_DIR).glob('*.json')) and
                        [p.stem for p in sorted(Path(PRESETS_DIR).glob('*.json'))] or [],
             'state': {
@@ -720,19 +830,29 @@ def collect_yu_state() -> dict:
                     'active_target_track_id': int(m.get('aim_target_id', -1)),
                     'aim_profile_alternate_offset_states': [False],
                     'hotkeys_suspended': False,
-                    'last_error': m.get('last_error') or ('未导入模型' if not prof.get('model_id') else ''),
+                    'last_error': runtime_error or ('未导入模型' if not prof.get('model_id') else ''),
                     'locked': False,
                 },
-                'last_error': m.get('last_error') or ('未导入模型' if not prof.get('model_id') else ''),
+                'last_error': runtime_error or ('未导入模型' if not prof.get('model_id') else ''),
                 # 自动标定状态由 TTBOX Calibration Domain 维护，普通轮询只读，不触发保存提示。
                 'calibration': _calibration_payload()['runtime'],
                 'capture': {
-                    'input_width': m.get('input_width', 0),
-                    'input_height': m.get('input_height', 0),
-                    'capture_fps': m.get('capture_fps', 0),
+                    'input_width': input_width,
+                    'input_height': input_height,
+                    'capture_fps': capture_fps,
                     'buffer_age_ms': m.get('buffer_age_ms', 0),
                     'last_dequeued_count': m.get('last_dequeued_count', 0),
                     'buffer_count': m.get('buffer_count', 0),
+                },
+                # 预览链路真实指标（PreviewModule 统计；0 = 未启动/无样本）
+                'preview': {
+                    'fps': m.get('preview_fps', 0),
+                    'encode_ms': m.get('preview_encode_ms', 0),
+                    'width': m.get('preview_width', 0),
+                    'height': m.get('preview_height', 0),
+                    'bytes': m.get('preview_bytes', 0),
+                    'frames': m.get('preview_frames', 0),
+                    'dropped': m.get('preview_dropped', 0),
                 },
                 'core': _core_state_payload(),
                 'crosshair': {
@@ -749,7 +869,7 @@ def collect_yu_state() -> dict:
                     'inference_fps': m.get('fps', 0),
                     'inference_ms': m.get('infer_ms', 0),
                     'model_loaded': bool(prof.get('model_id')),
-                    'frame_id': m.get('last_frame', 0),
+                    'frame_id': last_frame,
                     'timestamp_us': m.get('last_timestamp_us', 0),
                     'target_box': {
                         'x1': m.get('aim_target_x1', 0),
@@ -761,7 +881,19 @@ def collect_yu_state() -> dict:
                     } if m.get('aim_has_target', False) else None,
                     'boxes': m.get('detection_boxes', []),
                 },
-                'latency': {'capture_to_mouse_send_ms': m.get('e2e_ms', 0), 'preprocess_to_track_ms': m.get('e2e_ms', 0)},
+                'latency': {
+                    'capture_to_mouse_send_ms': m.get('e2e_ms', 0),
+                    'preprocess_to_track_ms': m.get('e2e_ms', 0),
+                    'queue_wait_ms': m.get('buffer_age_ms', 0),
+                    'rga_ms': m.get('resize_ms', 0),
+                    'rknn_set_input_ms': m.get('infer_set_input_ms', 0),
+                    'rknn_ms': m.get('infer_run_ms', 0),
+                    'rknn_output_ms': m.get('infer_output_ms', 0),
+                    'decode_ms': m.get('decode_ms', 0),
+                    'e2e_ms': m.get('e2e_ms', 0),
+                    'e2e_p95_ms': m.get('e2e_p95_ms', 0),
+                    'e2e_p99_ms': m.get('e2e_p99_ms', 0),
+                },
                 'loopout': _loopout_payload(),
                 'motion_training': {
                     'collection_active': False,
@@ -794,7 +926,7 @@ def collect_yu_state() -> dict:
                 'license': DEFAULT_LICENSE,
                 # 物理移动屏蔽实时状态（真实来源：RuntimeProfile mouse 配置 + 输出模式支持性）
                 'mouse_output': {
-                    'mode': 'local_hid',
+                    'mode': 'full_passthrough',
                     'physical_motion_block_support': 'supported',
                     'physical_motion_block_mask': (
                         (1 if (prof.get('mouse') or {}).get('block_physical_x') else 0) |
@@ -805,9 +937,9 @@ def collect_yu_state() -> dict:
                 # MJPEG 流（动态预览）：img 标签原生支持 multipart/x-mixed-replace，
                 # 前端 previewImage 直接消费；不能用 /api/preview.jpg（静态单帧，加载一次就冻结）
                 'preview_path': '/api/preview.mjpg',
-                'running': running,
+                'running': running and not degraded,
                 'selected_model_id': prof.get('model_id', ''),
-                'status': 'running' if running else 'stopped',
+                'status': runtime_status,
             },
             'ui': {
                 'app_title': 'TTBOX 控制台',
@@ -815,11 +947,11 @@ def collect_yu_state() -> dict:
                 'brand_mark': 'TT',
                 'brand_eyebrow': 'TTBOX',
                 'brand_title': 'TTBOX 控制台',
-                'ui_brand': 'yu',
+                'ui_brand': 'ttbox',
                 'default_theme': 'dark',
                 'allow_theme_switch': True,
             },
-            'ui_brand': 'yu',
+            'ui_brand': 'ttbox',
         },
     }
 
@@ -851,12 +983,12 @@ def add_no_cache_headers(response):
 def index():
     return render_template('index.html',
         app_title='TTBOX 控制台',
-        ui_brand='yu',
+        ui_brand='ttbox',
         brand_mark='TT',
         brand_eyebrow='TTBOX',
         brand_title='TTBOX 控制台',
         default_theme='dark',
-        asset_version='2026.09.01.1',
+        asset_version='2026.09.13.1',
         visual_theme={'id': 'default', 'version': 'built-in', 'color_scheme': 'dark', 'styles': []},
         module_labels=['首页', '配置', '模型', '预设', '运动', '校准', '硬件', '网络', '系统', '更新', '主题', '激活'],
         motion_training_available=True,
@@ -871,10 +1003,10 @@ def index():
 @app.get('/desktop')
 def desktop():
     return render_template('index.html', mode='desktop',
-        app_title='TTBOX 控制台', ui_brand='yu',
+        app_title='TTBOX 控制台', ui_brand='ttbox',
         brand_mark='TT', brand_eyebrow='TTBOX', brand_title='TTBOX 控制台',
         default_theme='dark',
-        asset_version='2026.09.01.1',
+        asset_version='2026.09.13.1',
         visual_theme={'id': 'default', 'version': 'built-in', 'color_scheme': 'dark', 'styles': []},
         module_labels=['首页', '配置', '模型', '预设', '运动', '校准', '硬件', '网络', '系统', '更新', '主题', '激活'],
         motion_training_available=True,
@@ -889,10 +1021,10 @@ def desktop():
 @app.get('/mobile')
 def mobile():
     return render_template('index.html', mode='mobile',
-        app_title='TTBOX 控制台', ui_brand='yu',
+        app_title='TTBOX 控制台', ui_brand='ttbox',
         brand_mark='TT', brand_eyebrow='TTBOX', brand_title='TTBOX 控制台',
         default_theme='dark',
-        asset_version='2026.09.01.1',
+        asset_version='2026.09.13.1',
         visual_theme={'id': 'default', 'version': 'built-in', 'color_scheme': 'dark', 'styles': []},
         module_labels=['首页', '配置', '模型', '预设', '运动', '校准', '硬件', '网络', '系统', '更新', '主题', '激活'],
         motion_training_available=True,
@@ -1166,6 +1298,11 @@ def update_config():
     if not isinstance(body, dict) or not body:
         return jsonify({'ok': True, 'data': profile_to_yu(prof)})
     translated = yu_body_to_profile(body)
+    # 模型选中唯一真源是 ModelRegistry 的 active（/api/models/select 修改）。
+    # 配置保存只在 body 明确携带非空 model_id 时透传；空串/缺失一律忽略，
+    # 防止前端临时缺模型列表时回写空 model_id 把激活模型清掉。
+    if not str(translated.get('model_id') or '').strip():
+        translated.pop('model_id', None)
     base = prof
     merged = _deep_merge_profile(base, translated)
     r = ipc_request('SET_CONFIG', {'profile': merged})
@@ -1331,6 +1468,158 @@ def update_auto_start_setting():
         return jsonify({'ok': False, 'error': f'保存开机自启动设置失败: {exc}'}), 500
 
 
+# -- 模型卡 UI 扩展字段持久化（game_profile/preset_name/hailo/remote 等）--
+# 不进 core manifest：这些是 Web 层 UI 绑定字段，独立存 installed/<id>/ui_meta.json，
+# 避免污染 ModelAdapter 校验元数据、也不需要重编 Core。
+_MODEL_UI_META_KEYS = ('game_profile', 'preset_name', 'hailo_pipeline_depth',
+                       'remote_frame_format', 'class_names', 'description')
+
+
+def _model_ui_meta_path(model_id: str) -> Path:
+    return Path(os.environ.get('TTBOX_MODEL_ROOT', '/opt/ttbox/models')) / 'installed' / model_id / 'ui_meta.json'
+
+
+def _read_model_ui_meta(model_id: str) -> dict:
+    try:
+        p = _model_ui_meta_path(model_id)
+        if p.exists():
+            data = json.loads(p.read_text(encoding='utf-8'))
+            return data if isinstance(data, dict) else {}
+    except Exception:
+        pass
+    return {}
+
+
+def _write_model_ui_meta(model_id: str, patch: dict) -> dict:
+    cur = _read_model_ui_meta(model_id)
+    for key in _MODEL_UI_META_KEYS:
+        if key in patch:
+            cur[key] = patch[key]
+    p = _model_ui_meta_path(model_id)
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix('.json.tmp')
+        tmp.write_text(json.dumps(cur, ensure_ascii=False, indent=2), encoding='utf-8')
+        os.replace(str(tmp), str(p))
+    except Exception:
+        raise
+    return cur
+
+
+def _merge_model_ui_meta(model: dict) -> dict:
+    merged = dict(model)
+    meta = _read_model_ui_meta(str(model.get('model_id') or model.get('id') or ''))
+    if meta:
+        for key in _MODEL_UI_META_KEYS:
+            if key in meta:
+                merged[key] = meta[key]
+    return merged
+
+
+def _effective_rknn_concurrency(record: dict) -> int:
+    """界面显示的并发 = Core 实际 worker 数。
+    manifest 显式配置了 worker_cores 就用它；否则回退全局 config 默认。"""
+    wc = str(record.get('worker_cores') or '').strip()
+    if not wc:
+        cfg = _load_config_file()
+        wc = str((cfg or {}).get('worker_cores') or '').strip()
+    tokens = [t.strip() for t in wc.split(',') if t.strip() in ('1', '2', '4')]
+    count = len(tokens)
+    return count if 1 <= count <= 3 else 3
+
+
+def _models_patch_response(model_id: str, patch: dict):
+    """统一返回：校验模型存在 → 写 ui_meta → 附带最新模型列表。模型不可用时返回 None。"""
+    check = ipc_request('MODEL_LIST')
+    if check.get('status') != 0:
+        return None
+    known = [m.get('model_id') for m in check.get('data', {}).get('models', [])]
+    if model_id not in known:
+        return None
+    _write_model_ui_meta(model_id, patch)
+    models_resp = list_models()
+    models_data = {}
+    if models_resp is not None:
+        try:
+            models_data = models_resp.get_json() or {}
+        except Exception:
+            models_data = {}
+    return {'ok': True, 'data': {
+        'message': '已保存',
+        'model_id': model_id,
+        **(models_data.get('data') or {}),
+    }}
+
+
+def _parse_model_labels_file(f) -> list:
+    """解析导入表单的类别标签文件（.txt/.names/.json/.csv），返回去重后的类别名列表。"""
+    if f is None or not f.filename:
+        return []
+    filename = (f.filename or '').lower()
+    raw = f.read()
+    try:
+        text = raw.decode('utf-8', errors='replace') if isinstance(raw, bytes) else str(raw)
+    except Exception:
+        text = str(raw)
+    items: list = []
+    if filename.endswith('.json'):
+        try:
+            data = json.loads(text)
+        except Exception:
+            return []
+        if isinstance(data, list):
+            items = [str(x).strip() for x in data if str(x).strip()]
+        elif isinstance(data, dict):
+            for key in ('class_names', 'classes', 'names', 'labels'):
+                candidate = data.get(key)
+                if isinstance(candidate, list):
+                    items = [str(x).strip() for x in candidate if str(x).strip()]
+                    break
+                if isinstance(candidate, dict):
+                    items = [str(v).strip() for v in candidate.values() if str(v).strip()]
+                    break
+    elif filename.endswith('.csv'):
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            first = line.split(',', 1)[0].strip().strip('"').strip("'")
+            if first:
+                items.append(first)
+    else:
+        for line in text.splitlines():
+            line = line.strip()
+            if line and not line.startswith('#'):
+                items.append(line)
+    seen = set()
+    result = []
+    for item in items:
+        item = str(item).strip()
+        if item and item not in seen:
+            seen.add(item)
+            result.append(item)
+    return result
+
+
+def _save_model_preset_from_import(f) -> str:
+    """导入预设参数文件到 PRESETS_DIR，返回安全预设名；不可用返回空字符串。"""
+    if f is None or not f.filename:
+        return ''
+    try:
+        raw = f.read()
+        data = json.loads(raw)
+    except Exception:
+        return ''
+    if not isinstance(data, dict):
+        return ''
+    name = str(data.get('name') or Path(f.filename).stem or 'imported')
+    safe = re.sub('[^\\w\\-]', '_', name)[:64]
+    d = Path(PRESETS_DIR)
+    d.mkdir(parents=True, exist_ok=True)
+    (d / (safe + '.json')).write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
+    return safe
+
+
 # -- 模型 --
 @app.get('/api/models')
 def list_models():
@@ -1366,13 +1655,14 @@ def list_models():
             'output_count': record.get('output_count'),
             'class_count': record.get('class_count'),
             'class_names': record.get('class_names') or [],
-            'rknn_concurrency': record.get('rknn_concurrency', 1),
+            'rknn_concurrency': _effective_rknn_concurrency(record),
             'selected': bool(record.get('selected')),
             'running': bool(record.get('running')),
             'metadata': record.get('metadata') or {},
         })
+    merged_models = [_merge_model_ui_meta(m) for m in models]
     return jsonify({'ok': True, 'data': {
-        'models': models,
+        'models': merged_models,
         'selected_model_id': data.get('selected_model_id', ''),
         'running_model_id': data.get('running_model_id', ''),
         'state': data.get('state', 'unknown'),
@@ -1381,14 +1671,14 @@ def list_models():
 
 
 # ---------------------------------------------------------------------------
-# 模型转换（ONNX → RKNN，对齐 YU 真机转换链）
+# 模型转换（ONNX → RKNN，使用 TTBOX 自有转换链，不依赖 YU /opt/aiassistance）
 #
-# 行为基准 = YU 真机实测（2026-09-06 取证）：
-#   - 转换器: /opt/aiassistance/Python/convert_onnx_to_rknn.py
-#   - venv:   /home/orangepi/aiassistance-rknn/venv（rknn-toolkit2 2.3.2）
+# 行为基准 = TTBOX 板端实测：
+#   - 转换器: /opt/ttbox/tools/converter/convert_onnx_to_rknn.py
+#   - venv:   /opt/ttbox/venv-convert（rknn-toolkit2 2.3.2）
 #   - INT8 asymmetric_quantized-8, mean 0/0/0, std 255/255/255
 #   - 输出布局 auto（raw6 → raw9 → yolo26 → raw3 → graph），失败自动重试
-#   - 校准图: 用户上传 zip，缺省用 YU 内置 209 张通用图
+#   - 校准图: 用户上传 zip，缺省用 /opt/ttbox/calib/imgs
 #   - 同一时间只允许一个转换（互斥）
 # 转换任务状态: idle / converting / success / failed
 # 转换产物不直接进模型库：统一走 MODEL_IMPORT → MODEL_VALIDATE → MODEL_INSTALL。
@@ -1398,11 +1688,11 @@ _CONVERT_STATE = {'state': 'idle', 'error': '', 'model_id': '', 'started_at': 0.
 _CONVERT_LOCK = threading.Lock()
 _CONVERT_WORKDIR = Path(os.environ.get('TTBOX_CONVERT_WORKDIR', '/tmp/ttbox_onnx_convert'))
 _CONVERTER_SCRIPT = os.environ.get('TTBOX_CONVERTER_SCRIPT',
-                                   '/opt/aiassistance/Python/convert_onnx_to_rknn.py')
+                                   '/opt/ttbox/tools/converter/convert_onnx_to_rknn.py')
 _CONVERTER_PYTHON = os.environ.get('TTBOX_CONVERTER_PYTHON',
-                                   '/home/orangepi/aiassistance-rknn/venv/bin/python')
+                                   '/opt/ttbox/venv-convert/bin/python')
 _CONVERT_CALIB_DIR = os.environ.get('TTBOX_CONVERT_CALIB_DIR',
-                                    '/opt/aiassistance/test_images/General')
+                                    '/opt/ttbox/calib/imgs')
 
 
 def _convert_state_public() -> dict:
@@ -1410,12 +1700,15 @@ def _convert_state_public() -> dict:
             ('state', 'error', 'model_id', 'started_at', 'finished_at', 'message')}
 
 
-def _run_onnx_conversion(onnx_path: Path, output_path: Path, log_lines: list) -> bool:
+def _run_onnx_conversion(onnx_path: Path, output_path: Path, log_lines: list,
+                         dataset_root: str = '') -> bool:
     """调用 YU 对齐转换器。成功返回 True；失败按 YU 行为自动重试一次（graph 布局降级）。"""
+    if not dataset_root:
+        dataset_root = _CONVERT_CALIB_DIR
     cmd = [
         _CONVERTER_PYTHON, _CONVERTER_SCRIPT,
         '--onnx', str(onnx_path),
-        '--dataset-root', _CONVERT_CALIB_DIR,
+        '--dataset-root', dataset_root,
         '--dataset-count', '5',                      # YU 实测：缺省 5 张 evenly sample
         '--target-platform', 'rk3588',
         '--output', str(output_path),
@@ -1434,16 +1727,40 @@ def _run_onnx_conversion(onnx_path: Path, output_path: Path, log_lines: list) ->
     return False
 
 
-def _conversion_worker(onnx_tmp: Path, calib_tmp, model_id: str, label: str) -> None:
+def _conversion_worker(onnx_tmp: Path, calib_tmp, model_id: str, label: str,
+                       extra_meta: dict | None = None) -> None:
     """转换线程：ONNX → RKNN → 统一入库（与 RKNN 直接上传同一条 import→validate→install 路）。"""
     work = _CONVERT_WORKDIR / model_id
+    logs: list[str] = []
     try:
         work.mkdir(parents=True, exist_ok=True)
         onnx_src = work / 'source.onnx'
         onnx_tmp.replace(onnx_src)
         rknn_out = work / (model_id + '_raw_int8_rk3588.rknn')
-        if not _run_onnx_conversion(onnx_src, rknn_out, []):
-            _CONVERT_STATE.update(state='failed', error='ONNX 转换失败（已自动重试一次）',
+        dataset_root = _CONVERT_CALIB_DIR
+        calib_dir = None
+        if calib_tmp is not None and calib_tmp.exists():
+            calib_dir = work / 'calib'
+            calib_dir.mkdir(parents=True, exist_ok=True)
+            try:
+                with zipfile.ZipFile(calib_tmp, 'r') as zf:
+                    zf.extractall(calib_dir)
+                if any(p.is_file() and p.suffix.lower() in
+                       {'.jpg', '.jpeg', '.png', '.bmp', '.webp'}
+                       for p in calib_dir.rglob('*')):
+                    dataset_root = str(calib_dir)
+                else:
+                    calib_dir = None
+                    dataset_root = _CONVERT_CALIB_DIR
+            except (zipfile.BadZipFile, OSError) as exc:
+                calib_dir = None
+                dataset_root = _CONVERT_CALIB_DIR
+                print(f'calibration zip extract failed, fallback default: {exc}', file=sys.stderr)
+        if not _run_onnx_conversion(onnx_src, rknn_out, logs, dataset_root=dataset_root):
+            detail = (logs[-1] if logs else '').strip()[-300:]
+            _CONVERT_STATE.update(state='failed',
+                                  error=('ONNX 转换失败（已自动重试一次）' +
+                                         (f'：{detail}' if detail else '')),
                                   finished_at=time.time())
             return
         inc = Path('/opt/ttbox/models/_incoming')
@@ -1469,6 +1786,11 @@ def _conversion_worker(onnx_tmp: Path, calib_tmp, model_id: str, label: str) -> 
             _CONVERT_STATE.update(state='failed', error=r3.get('error', '安装失败'),
                                   finished_at=time.time())
             return
+        if extra_meta:
+            try:
+                _write_model_ui_meta(model_id, extra_meta)
+            except Exception:
+                pass
         _CONVERT_STATE.update(state='success', error='', finished_at=time.time(),
                               message='ONNX 已转换并入库')
     except Exception as exc:  # 转换线程兜底：任何异常都必须落到 failed 状态
@@ -1498,6 +1820,19 @@ def import_onnx():
         stem = re.sub(r'\.onnx$', '', f.filename, flags=re.I)
         model_id = re.sub(r'[^A-Za-z0-9_\-]', '_', stem)[:64].strip('_') or 'model'
         label = stem.strip() or model_id
+        extra_meta = {}
+        class_names = _parse_model_labels_file(request.files.get('labels_file'))
+        preset_name = _save_model_preset_from_import(request.files.get('preset_file'))
+        if class_names:
+            extra_meta['class_names'] = class_names
+        if preset_name:
+            extra_meta['preset_name'] = preset_name
+        game_profile = str(request.form.get('game_profile') or '').strip() or 'generic'
+        if game_profile != 'generic':
+            extra_meta['game_profile'] = game_profile
+        description = str(request.form.get('description') or '').strip()
+        if description:
+            extra_meta['description'] = description
         _CONVERT_WORKDIR.mkdir(parents=True, exist_ok=True)
         onnx_tmp = _CONVERT_WORKDIR / ('upload_%d.onnx' % int(time.time() * 1000))
         f.save(str(onnx_tmp))
@@ -1513,7 +1848,7 @@ def import_onnx():
                               started_at=time.time(), finished_at=0.0,
                               message='正在导入并转换')
         threading.Thread(target=_conversion_worker,
-                         args=(onnx_tmp, calib_tmp, model_id, label),
+                         args=(onnx_tmp, calib_tmp, model_id, label, extra_meta),
                          daemon=True).start()
     return jsonify({'ok': True, 'data': {'message': '已开始转换', 'model_id': model_id}})
 
@@ -1559,19 +1894,29 @@ def import_model():
     if f is None or not f.filename:
         return jsonify({'ok': False, 'error': 'missing upload field: file'})
     fname = f.filename
-    if not fname.lower().endswith('.rknn'):
+    class_names = _parse_model_labels_file(request.files.get('labels_file'))
+    preset_name = _save_model_preset_from_import(request.files.get('preset_file'))
+    # Windows 本地环境（TTBOX_ALLOW_ONNX=1）允许 .onnx 直入（无 RKNN 转换链）；
+    # 板端保持 .rknn 单一入口，行为不变。
+    allow_onnx = os.environ.get('TTBOX_ALLOW_ONNX', '') == '1'
+    lower = fname.lower()
+    if lower.endswith('.onnx') and allow_onnx:
+        pass
+    elif not lower.endswith('.rknn'):
         return jsonify({'ok': False, 'error': '仅支持 .rknn 模型文件'})
-    stem = re.sub(r'\.rknn$', '', fname, flags=re.I)
+    stem = re.sub(r'\.(rknn|onnx)$', '', fname, flags=re.I)
     model_id = re.sub(r'[^A-Za-z0-9_\-]', '_', stem)[:64].strip('_') or 'model'
     # label 保留原始文件名主干（含中文），供前端显示；model_id 是净化后的内部标识
     label = stem.strip() or model_id
     incoming = Path(os.environ.get('TTBOX_MODEL_ROOT', '/opt/ttbox/models')) / '_incoming'
     incoming.mkdir(parents=True, exist_ok=True)
-    dst = incoming / f'{model_id}.rknn'
+    src_ext = '.onnx' if lower.endswith('.onnx') else '.rknn'
+    dst = incoming / f'{model_id}{src_ext}'
     f.save(str(dst))
     import hashlib as _hashlib
     _sha = _hashlib.sha256(dst.read_bytes()).hexdigest()
     r1 = ipc_request('MODEL_IMPORT', {'src_path': str(dst), 'model_id': model_id, 'label': label,
+                                      'source_format': 'onnx' if src_ext == '.onnx' else 'rknn',
                                       'sha256': _sha})
     if r1.get('status') != 0:
         dst.unlink(missing_ok=True)
@@ -1582,6 +1927,22 @@ def import_model():
     r3 = ipc_request('MODEL_INSTALL', {'model_id': model_id})
     if r3.get('status') != 0:
         return jsonify({'ok': False, 'error': r3.get('error', '安装失败')})
+    ui_meta = {}
+    if class_names:
+        ui_meta['class_names'] = class_names
+    if preset_name:
+        ui_meta['preset_name'] = preset_name
+    game_profile = str(request.form.get('game_profile') or '').strip() or 'generic'
+    if game_profile != 'generic':
+        ui_meta['game_profile'] = game_profile
+    description = str(request.form.get('description') or '').strip()
+    if description:
+        ui_meta['description'] = description
+    if ui_meta:
+        try:
+            _write_model_ui_meta(model_id, ui_meta)
+        except Exception:
+            pass
     return jsonify({'ok': True, 'data': {'message': '导入成功', 'model_id': model_id}})
 
 
@@ -1606,30 +1967,13 @@ def select_model():
     response = ipc_request('MODEL_ACTIVATE', {'model_id': model_id})
     if response.get('status') != 0:
         return jsonify({'ok': False, 'error': response.get('error', '激活失败')}), 409
-    # config 同步：active 模型 = config.model_label/model_path（F004 真源），重启 runtime 生效
-    inst = f'/opt/ttbox/models/installed/{model_id}/model.rknn'
-    cpath = os.environ.get('TTBOX_CONFIG', '/opt/ttbox/config/default.json')
-    try:
-        cfg = json.load(open(cpath))
-        if os.path.exists(inst):
-            cfg['model_path'] = inst
-            cfg['model_label'] = model_id
-        else:
-            cfg['model_label'] = model_id
-            cfg.pop('model_path', None)
-        json.dump(cfg, open(cpath, 'w'), indent=2, ensure_ascii=False)
-    except Exception:
-        pass
-    ipc_request('RUNTIME_CONTROL', {'action': 'stop'})
-    time.sleep(0.5)
-    ipc_request('RUNTIME_CONTROL', {'action': 'start'})
     status_response = ipc_request('MODEL_LIST')
     if status_response.get('status') != 0:
         return jsonify({'ok': False, 'error': status_response.get('error', 'ModelRegistry unavailable')}), 503
     data = status_response.get('data', {}) or {}
     return jsonify({'ok': True, 'data': {
-        'message': '模型已选中，当前 Core 运行模型保持不变；重启或后续切换阶段生效',
-        'restart_required': True,
+        'message': '模型已切换，Core 已加载新模型并完成首帧验证',
+        'restart_required': False,
         'selected_model_id': data.get('selected_model_id', model_id),
         'running_model_id': data.get('running_model_id', ''),
         'state': data.get('state', 'switching'),
@@ -1642,7 +1986,13 @@ def bind_model_preset():
     body = request.get_json(silent=True) or {}
     if not body.get('model_id'):
         return jsonify({'ok': False, 'error': 'model_id is required'}), 400
-    return jsonify({'ok': False, 'error': 'ModelRegistry 暂未提供 manifest 扩展字段写入接口'}), 501
+    model_id = str(body.get('model_id') or '').strip()
+    preset_name = str(body.get('preset_name') or '').strip()
+    r = _models_patch_response(model_id, {'preset_name': preset_name})
+    if r is None:
+        return jsonify({'ok': False, 'error': '模型不存在或不可用'}), 404
+    r['data']['model'] = {'preset_name': preset_name}
+    return jsonify(r)
 
 
 @app.post('/api/models/game-profile')
@@ -1650,7 +2000,13 @@ def update_model_game_profile():
     body = request.get_json(silent=True) or {}
     if not body.get('model_id'):
         return jsonify({'ok': False, 'error': 'model_id is required'}), 400
-    return jsonify({'ok': False, 'error': 'ModelRegistry 暂未提供 manifest 扩展字段写入接口'}), 501
+    model_id = str(body.get('model_id') or '').strip()
+    game_profile = str(body.get('game_profile') or 'generic').strip() or 'generic'
+    r = _models_patch_response(model_id, {'game_profile': game_profile})
+    if r is None:
+        return jsonify({'ok': False, 'error': '模型不存在或不可用'}), 404
+    r['data']['message'] = '游戏配置已保存'
+    return jsonify(r)
 
 
 @app.post('/api/models/remote-frame-format')
@@ -1658,7 +2014,15 @@ def update_model_remote_frame_format():
     body = request.get_json(silent=True) or {}
     if not body.get('model_id', ''):
         return jsonify({'ok': False, 'error': 'model_id is required'})
-    return jsonify({'ok': True, 'data': {'message': '已更新'}})
+    model_id = str(body.get('model_id') or '').strip()
+    fmt = str(body.get('remote_frame_format') or 'jpeg').strip().lower()
+    if fmt not in ('jpeg', 'nv12', 'h264'):
+        fmt = 'jpeg'
+    r = _models_patch_response(model_id, {'remote_frame_format': fmt})
+    if r is None:
+        return jsonify({'ok': False, 'error': '模型不存在或不可用'}), 404
+    r['data']['message'] = '帧格式已保存'
+    return jsonify(r)
 
 
 @app.post('/api/models/rknn-concurrency')
@@ -1666,7 +2030,33 @@ def update_model_rknn_concurrency():
     body = request.get_json(silent=True) or {}
     if not body.get('model_id'):
         return jsonify({'ok': False, 'error': 'model_id is required'}), 400
-    return jsonify({'ok': False, 'error': '模型并发配置需通过 RuntimeConfig 专用接口接入'}), 501
+    raw_count = body.get('count', body.get('rknn_concurrency'))
+    try:
+        count = int(raw_count)
+    except (TypeError, ValueError):
+        return jsonify({'ok': False, 'error': 'count 必须是 1~3 的整数'}), 400
+    if count < 1 or count > 3:
+        return jsonify({'ok': False, 'error': 'count 必须在 1~3 之间'}), 400
+    r = ipc_request('MODEL_SET_CONCURRENCY', {
+        'model_id': body['model_id'],
+        'count': count,
+    })
+    if r.get('status') != 0:
+        return jsonify({'ok': False, 'error': r.get('error', '设置并发失败')}), 409
+    models_resp = list_models()
+    models_data = {}
+    if models_resp is not None:
+        try:
+            models_data = models_resp.get_json() or {}
+        except Exception:
+            models_data = {}
+    return jsonify({'ok': True, 'data': {
+        'message': '并发已保存并生效',
+        'model_id': body['model_id'],
+        'rknn_concurrency': count,
+        'restart_required': False,
+        **(models_data.get('data') or {}),
+    }})
 
 
 @app.post('/api/models/hailo-pipeline-depth')
@@ -1674,7 +2064,16 @@ def update_model_hailo_pipeline_depth():
     body = request.get_json(silent=True) or {}
     if not body.get('model_id', ''):
         return jsonify({'ok': False, 'error': 'model_id is required'})
-    return jsonify({'ok': True, 'data': {'message': '已更新'}})
+    model_id = str(body.get('model_id') or '').strip()
+    try:
+        depth = max(1, min(4, int(body.get('hailo_pipeline_depth') or 3)))
+    except (TypeError, ValueError):
+        depth = 3
+    r = _models_patch_response(model_id, {'hailo_pipeline_depth': depth})
+    if r is None:
+        return jsonify({'ok': False, 'error': '模型不存在或不可用'}), 404
+    r['data']['message'] = '流水线深度已保存'
+    return jsonify(r)
 
 
 @app.post('/api/models/class-names')
@@ -1682,7 +2081,16 @@ def update_model_class_names():
     body = request.get_json(silent=True) or {}
     if not body.get('model_id'):
         return jsonify({'ok': False, 'error': 'model_id is required'}), 400
-    return jsonify({'ok': False, 'error': 'ModelRegistry 暂未提供 metadata 写入接口'}), 501
+    model_id = str(body.get('model_id') or '').strip()
+    class_names = body.get('class_names')
+    if not isinstance(class_names, list):
+        return jsonify({'ok': False, 'error': 'class_names 必须是数组'}), 400
+    clean = [str(n).strip() for n in class_names if str(n).strip()]
+    r = _models_patch_response(model_id, {'class_names': clean})
+    if r is None:
+        return jsonify({'ok': False, 'error': '模型不存在或不可用'}), 404
+    r['data']['message'] = '类别名称已保存'
+    return jsonify(r)
 
 
 # -- 预设 --
@@ -1918,8 +2326,16 @@ def _calib_sample_center(n: int = 3):
 
 
 def _calib_apply_gain(calib: dict) -> tuple[bool, str]:
-    """标定结果换算 kp 写回 RuntimeProfile（与旧后端/C 桥同款 K_LOOP=1/7）。"""
-    K_LOOP = 0.142857
+    """标定结果写回 RuntimeProfile。
+
+    修复：标定测的是“每 count 对应多少 px”（gain），这是物理量：
+      - gain_x/gain_y_px_per_count 写回 mouse（压枪 recoil_px_per_count、
+        拟人化 response_px_per_count 都依赖它，之前未序列化导致标定结果白测）；
+      - personal_trajectory.response_px_per_count 联动 gain_y（同语义：px/count）；
+      - 不再改写 kp_x/kp_y。旧实现用旧后端 K_LOOP=1/7 反推 kp（25 → ≈0.26），
+        在 pid1 体系下输出被 smoothTerm 缩放到 deadzone 以下，自瞄直接瘫痪。
+        pid1 的自适应 kp_gain 已处理灵敏度差异，标定不应动 kp。
+    """
     try:
         gain_x = float(calib.get('mouse_gain_x_px_per_count') or 0)
         gain_y = float(calib.get('mouse_gain_y_px_per_count') or 0)
@@ -1929,12 +2345,40 @@ def _calib_apply_gain(calib: dict) -> tuple[bool, str]:
         if not prof:
             return False, '读取 RuntimeProfile 失败'
         mo = prof.setdefault('mouse', {})
-        sx = (float(mo.get('rate_x', 1) or 1) * float(mo.get('sensitivity', 1) or 1)
-              * float(mo.get('output_scale', 1) or 1))
-        sy = (float(mo.get('rate_y', 1) or 1) * float(mo.get('sensitivity', 1) or 1)
-              * float(mo.get('output_scale', 1) or 1))
-        mo['kp_x'] = round(K_LOOP / max(gain_x * sx, 1e-6), 4)
-        mo['kp_y'] = round(K_LOOP / max(gain_y * sy, 1e-6), 4)
+        mo['gain_x_px_per_count'] = round(gain_x, 4)
+        mo['gain_y_px_per_count'] = round(gain_y, 4)
+        # 拟人化抖动预算与压枪换算共用同一物理量：px/count 联动。
+        # 注意层级：personal_trajectory 是 mouse 的子对象（RuntimeProfile 序列化结构）。
+        pt = mo.setdefault('personal_trajectory', {})
+        pt['response_px_per_count'] = round(gain_y, 4)
+        r = ipc_request('SET_CONFIG', {'profile': prof})
+        return r.get('status') == 0, r.get('error', '配置已更新')
+    except Exception as exc:
+        return False, str(exc)
+
+
+def _calib_apply_pid(calib: dict) -> tuple[bool, str]:
+    """自动调参核心：按标定实测 gain + 延迟推导整组 PID 参数并写回。
+
+    不同客户场景（屏幕灵敏度/DPI/系统延迟/游戏内灵敏度）→ 实测 gain/延迟不同
+    → 推导出不同的最佳 KP/KD/predict。只动这三个参数，rate/smooth 保持
+    架构常量；predict_y 保持 0（Y 轴无预测，pid1 参考行为）。
+    """
+    try:
+        pid = derive_pid_params(
+            float(calib.get('mouse_gain_x_px_per_count') or 0),
+            float(calib.get('mouse_gain_y_px_per_count') or 0),
+            float(calib.get('mouse_response_delay_ms') or 0),
+        )
+        prof = _get_runtime_profile()
+        if not prof:
+            return False, '读取 RuntimeProfile 失败'
+        mo = prof.setdefault('mouse', {})
+        mo['kp_x'] = pid['kp']
+        mo['kp_y'] = pid['kp']
+        mo['kd_x'] = pid['kd']
+        mo['kd_y'] = pid['kd']
+        mo['predict_x'] = pid['predict']
         r = ipc_request('SET_CONFIG', {'profile': prof})
         return r.get('status') == 0, r.get('error', '配置已更新')
     except Exception as exc:
@@ -2051,22 +2495,28 @@ def _calib_worker() -> None:
                     return
                 injected_at = time.monotonic()
                 samples = []
-                for _ in range(20):
-                    time.sleep(0.05)
+                first_response_ms = None
+                for _ in range(60):
+                    time.sleep(0.008)
                     target = _calib_target()
                     if target is None:
                         continue
                     if target['target_id'] != base['target_id'] or target['class_id'] != base['class_id']:
                         continue
                     delta = (target['x'] - base['x']) if axis is CalibrationAxis.X else (target['y'] - base['y'])
+                    now_ms = (time.monotonic() - injected_at) * 1000.0
+                    if first_response_ms is None and abs(delta) >= 0.3:
+                        first_response_ms = now_ms
                     samples.append(CalibrationObservation(
                         axis=axis,
                         injected_count=float(amp),
                         measured_delta_px=abs(delta),
-                        response_delay_ms=(target['timestamp'] - injected_at) * 1000.0,
+                        response_delay_ms=first_response_ms if first_response_ms is not None else now_ms,
                         target_id=f"{target['target_id']}:{target['class_id']}",
                         valid=abs(delta) >= 0.3,
                     ))
+                    if len(samples) >= 20 and first_response_ms is not None:
+                        break
                 # 清除本轮偏置，避免下一轮叠加；仍保持标定模式直到 finally。
                 prof = _get_runtime_profile()
                 mo = prof.setdefault('mouse', {})
@@ -2130,11 +2580,21 @@ def _calib_worker() -> None:
             'capture': {'crop_size': int((_get_runtime_profile().get('preview') or {}).get('roi_w') or 320)},
             'rounds': len(axis_observations[CalibrationAxis.X]) + len(axis_observations[CalibrationAxis.Y]),
         }
+        # 自动调参：按实测 gain/延迟推导 KP/KD/predict（pid1 体系，见
+        # ttbox_motion/calibration.derive_pid_params + core/tools/pid_sim 仿真验证）
+        try:
+            calib['pid_params'] = derive_pid_params(gain_x, gain_y, delay_ms)
+        except Exception:
+            calib['pid_params'] = {}
         ok, detail = _write_calibration(calib)
         if ok:
             ok2, detail2 = _calib_apply_gain(calib)
-            ok = ok and ok2
             detail = detail + '；' + detail2
+            ok = ok and ok2
+            if ok2 and calib.get('pid_params'):
+                ok3, detail3 = _calib_apply_pid(calib)
+                detail = detail + '；' + detail3
+                ok = ok and ok3
         _calib_set(
             state='completed' if ok else 'failed',
             status='success' if ok else 'failed',
@@ -2249,11 +2709,21 @@ def update_auto_calibration():
     if ok:
         ok2, detail2 = _calib_apply_gain(calib)
         detail = detail + '；' + detail2
-        if ok2:
+        # 手动填增益同样联动自动调参（同一推导函数，保证行为一致）
+        try:
+            calib['pid_params'] = derive_pid_params(gain_x, gain_y, delay)
+        except Exception:
+            calib['pid_params'] = {}
+        if ok2 and calib.get('pid_params'):
+            ok3, detail3 = _calib_apply_pid(calib)
+            detail = detail + '；' + detail3
+            ok = ok and ok3
+            _write_calibration(calib)
+        if ok:
             _calib_set(status='manual', phase='done', ready=True, reason='completed')
         else:
-            # Core 未运行时文件已保存但 kp 未生效：不标记完成（诚实反映）
-            _calib_set(status='manual', phase='saved', ready=False, reason=detail2)
+            # Core 未运行时文件已保存但参数未生效：不标记完成（诚实反映）
+            _calib_set(status='manual', phase='saved', ready=False, reason=detail)
     resp = jsonify({'ok': ok, 'data': _calibration_payload(), 'detail': detail})
     resp.status_code = 200 if ok else 500
     return resp
@@ -2357,6 +2827,7 @@ def start_aim_trace():
                 pass
             time.sleep(0.02)
         try:
+            os.makedirs('/opt/ttbox/run', exist_ok=True)
             with open('/opt/ttbox/run/aim_trace.json', 'w') as f:
                 json.dump({'samples': _aim_trace['samples'], 'duration_sec': duration_sec}, f)
         except Exception:
@@ -2468,20 +2939,57 @@ def get_mouse_hardware():
                 while parent.count(':') > 0:  # 去掉接口后缀
                     parent = parent.rsplit(':', 1)[0]
                 try:
-                    vid = open(os.path.join(parent, 'idVendor')).read().strip()
-                    pid = open(os.path.join(parent, 'idProduct')).read().strip()
-                    mfr = ''
-                    mp = os.path.join(parent, 'manufacturer')
-                    if os.path.exists(mp):
-                        mfr = open(mp).read().strip()
-                    prod = ''
-                    pp = os.path.join(parent, 'product')
-                    if os.path.exists(pp):
-                        prod = open(pp).read().strip()
-                    usb_cfg['usb_vid'] = '0x' + vid
-                    usb_cfg['usb_pid'] = '0x' + pid
+                    def _rd(p):
+                        try:
+                            return open(os.path.join(parent, p)).read().strip()
+                        except Exception:
+                            return ''
+                    vid = _rd('idVendor')
+                    pid = _rd('idProduct')
+                    mfr = _rd('manufacturer')
+                    prod = _rd('product')
+                    cfg_name = _rd('configuration')
+                    bcd_dev = _rd('bcdDevice')
+                    bcd_usb = _rd('version')
+                    dev_cls = _rd('bDeviceClass')
+                    dev_sub = _rd('bDeviceSubClass')
+                    dev_proto = _rd('bDeviceProtocol')
+                    max_power = _rd('bMaxPower')  # 形如 "98mA"
+                    usb_cfg['usb_vid'] = '0x' + vid if vid else usb_cfg['usb_vid']
+                    usb_cfg['usb_pid'] = '0x' + pid if pid else usb_cfg['usb_pid']
                     usb_cfg['usb_manufacturer'] = mfr
                     usb_cfg['usb_product'] = prod
+                    usb_cfg['usb_configuration'] = cfg_name
+                    usb_cfg['usb_serial'] = _rd('serial')
+                    if bcd_dev:
+                        usb_cfg['usb_bcd_device'] = '0x' + bcd_dev
+                    if bcd_usb:
+                        usb_cfg['usb_bcd_usb'] = '0x' + bcd_usb.replace('.', '')
+                    if dev_cls:
+                        usb_cfg['usb_device_class'] = int(dev_cls, 16)
+                    if dev_sub:
+                        usb_cfg['usb_device_subclass'] = int(dev_sub, 16)
+                    if dev_proto:
+                        usb_cfg['usb_device_protocol'] = int(dev_proto, 16)
+                    if max_power.endswith('mA'):
+                        usb_cfg['usb_max_power'] = int(max_power[:-2])
+                    # 鼠标接口(1.x)真实协议与端点 interval
+                    try:
+                        if _rd('bInterfaceProtocol') if False else True:
+                            iface_proto = open(os.path.join(dev, 'bInterfaceProtocol')).read().strip()
+                            iface_sub = open(os.path.join(dev, 'bInterfaceSubClass')).read().strip()
+                            if iface_proto:
+                                usb_cfg['hid_protocol'] = int(iface_proto)
+                            if iface_sub:
+                                usb_cfg['hid_subclass'] = int(iface_sub)
+                        eps = sorted(glob.glob(os.path.join(dev, 'ep_*')))
+                        for ep in eps:
+                            iv = open(os.path.join(ep, 'bInterval')).read().strip()
+                            if iv:
+                                usb_cfg['hid_interval'] = int(iv)
+                                break
+                    except Exception:
+                        pass
                     physical = {'device': os.path.basename(parent),
                                 'interface': bdev, 'name': prod or mfr}
                     connected = True
@@ -2828,12 +3336,22 @@ def update_display_hardware():
                 else:
                     continue  # 空/auto 不覆盖
             cur[k] = cfg_in[k]
+    # hardware_display.device 表示 HDMI-RX 输入设备，不能接受 DRM 输出节点。
+    # auto/空值统一落为真实 V4L2 节点，避免界面显示与 EDID 实际注入路径漂移。
+    requested_device = str(cur.get('device', 'auto') or 'auto').strip()
+    if requested_device == 'auto' or not requested_device:
+        cur['device'] = '/dev/video0'
+    elif requested_device.startswith('/dev/dri/') or 'card' in requested_device or 'renderD' in requested_device:
+        return jsonify({'ok': False, 'error': 'HDMI-RX 输入必须使用 /dev/video0，/dev/dri/card0 仅用于 loopout'}), 400
     json.dump(cur, open(cpath, 'w'), indent=2, ensure_ascii=False)
 
     result = {}
     if apply_now:
+        apply_env = dict(os.environ)
+        apply_env['TTBOX_EDID_REHANDSHAKE'] = '1'
+        apply_env['TTBOX_EDID_REHANDSHAKE_ATTEMPTS'] = '6'
         r = subprocess.run(['bash', '/opt/ttbox/scripts/edid/edid_apply.sh'],
-                           capture_output=True, text=True, timeout=60)
+                           capture_output=True, text=True, timeout=60, env=apply_env)
         result = {'exit': r.returncode, 'output': (r.stdout + r.stderr).strip()[-500:]}
         if r.returncode != 0:
             return jsonify({'ok': False, 'error': f'EDID 应用失败: {r.stderr or r.stdout}'[-300:]})
@@ -2971,18 +3489,18 @@ def _license_payload() -> dict:
     }
     ui = {
         'allow_theme_switch': True,
-        'app_title': 'YU 控制台',
-        'brand_eyebrow': 'AIASSISTANCE',
-        'brand_mark': 'AI',
-        'brand_name': 'YU',
-        'brand_title': 'YU 控制台',
+        'app_title': 'TTBOX 控制台',
+        'brand_eyebrow': 'TTBOX',
+        'brand_mark': 'TT',
+        'brand_name': 'TTBOX',
+        'brand_title': 'TTBOX 控制台',
         'default_hotspot_ssid': 'TTBOX',  # 真实热点名（wifi_manager DEFAULT_SSID=TTBOX）
         'default_local_name': 'aiassistance',
         'default_theme': 'dark',
-        'ui_brand': 'yu',
+        'ui_brand': 'ttbox',
     }
     core_version = '2026.05.16'
-    app_version = '2026.08.03.1'
+    app_version = TTBOX_APP_VERSION
     return {
         'app_version': app_version,
         'auto_start': _auto_start_payload(),
@@ -2999,7 +3517,7 @@ def _license_payload() -> dict:
         },
         'license': license_data,
         'ui': ui,
-        'ui_brand': 'yu',
+        'ui_brand': 'ttbox',
         'version': app_version,
     }
 
@@ -3578,6 +4096,11 @@ def preview():
     return Response(px, mimetype='image/jpeg')
 
 
+# 预览流健康监控：任何 MJPEG 连接收到帧数据即刷新 last_frame_ts。
+# 前端 /api/state 轮询依据 preview.alive 判断预览流是否存活（服务重启/断线时自动重建连接）。
+_PREVIEW_MONITOR = {"last_frame_ts": 0.0, "active_conns": 0}
+
+
 @app.get('/api/preview.mjpg')
 def preview_stream():
     preview_url = os.environ.get('TTBOX_PREVIEW_URL', '').rstrip('/')
@@ -3590,34 +4113,40 @@ def preview_stream():
         upstream_port = parsed.port or 8001
 
         def proxy_stream():
-            while True:
-                try:
-                    upstream = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    upstream.settimeout(5)
-                    upstream.connect((upstream_host, upstream_port))
-                    req_line = 'GET /api/preview.mjpg HTTP/1.1\r\nHost: {}:{}\r\n\r\n'.format(upstream_host, upstream_port)
-                    upstream.sendall(req_line.encode())
-                    # 剥掉上游 HTTP 响应头（读到第一个 CRLFCRLF），只透传 multipart body，
-                    # 否则浏览器会在 multipart 流里收到嵌套的 HTTP 头而无法解析。
-                    buf = b''
-                    while b'\r\n\r\n' not in buf:
-                        chunk = upstream.recv(4096)
-                        if not chunk:
-                            break
-                        buf += chunk
-                    if b'\r\n\r\n' in buf:
-                        body = buf.split(b'\r\n\r\n', 1)[1]
-                        if body:
-                            yield body
-                    # 后续字节是纯 multipart 流，直接透传
-                    while True:
-                        chunk = upstream.recv(65536)
-                        if not chunk:
-                            break
-                        yield chunk
-                except (OSError, ConnectionResetError):
-                    pass
-                time.sleep(0.5)  # 断线重连间隔
+            _PREVIEW_MONITOR["active_conns"] += 1
+            try:
+                while True:
+                    try:
+                        upstream = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        upstream.settimeout(5)
+                        upstream.connect((upstream_host, upstream_port))
+                        req_line = 'GET /api/preview.mjpg HTTP/1.1\r\nHost: {}:{}\r\n\r\n'.format(upstream_host, upstream_port)
+                        upstream.sendall(req_line.encode())
+                        # 剥掉上游 HTTP 响应头（读到第一个 CRLFCRLF），只透传 multipart body，
+                        # 否则浏览器会在 multipart 流里收到嵌套的 HTTP 头而无法解析。
+                        buf = b''
+                        while b'\r\n\r\n' not in buf:
+                            chunk = upstream.recv(4096)
+                            if not chunk:
+                                break
+                            buf += chunk
+                        if b'\r\n\r\n' in buf:
+                            body = buf.split(b'\r\n\r\n', 1)[1]
+                            if body:
+                                _PREVIEW_MONITOR["last_frame_ts"] = time.time()
+                                yield body
+                        # 后续字节是纯 multipart 流，直接透传
+                        while True:
+                            chunk = upstream.recv(65536)
+                            if not chunk:
+                                break
+                            _PREVIEW_MONITOR["last_frame_ts"] = time.time()
+                            yield chunk
+                    except (OSError, ConnectionResetError):
+                        pass
+                    time.sleep(0.5)  # 断线重连间隔
+            finally:
+                _PREVIEW_MONITOR["active_conns"] -= 1
 
         return Response(
             proxy_stream(),
@@ -3656,7 +4185,10 @@ def main():
     print(f'  模板目录: {TEMPLATE_DIR}')
     print(f'  静态目录: {STATIC_DIR}')
     print(f'  IPC Socket: {IPC_SOCKET}')
-    serve(app, host=LISTEN_HOST, port=LISTEN_PORT)
+    # waitress 默认 4 线程会被 MJPEG 长连接占满（每个预览流永久占 1 线程），
+    # 导致 API 请求排队（queue depth 警告）、预览流卡顿（画面/检测框卡住）、
+    # 配置保存无响应。threads=16 保证预览流与 API 互不饿死。
+    serve(app, host=LISTEN_HOST, port=LISTEN_PORT, threads=16)
 
 
 if __name__ == '__main__':

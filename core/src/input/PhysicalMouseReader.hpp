@@ -17,13 +17,19 @@ public:
     bool running() const{return running_.load();}
     std::atomic<uint16_t>* button_source(){return &buttons_;}
     std::string device() const{return device_;}
+    // usb-proxy 按键事件通道。默认使用 TTBOX 自己的运行目录，避免读到 YU 的 event.sock。
+    void set_event_socket_path(const std::string& path){ if(!path.empty()) event_socket_path_=path; }
 private:
     void loop();
     void event_socket_loop();
     bool find_device(std::string* out) const;
+    // 只负责建连/订阅/收 ACK；不断开时由 event_socket_loop 持有。
+    bool open_event_socket(std::string* error);
     bool start_event_socket(std::string* error);
-    std::string device_; std::string event_socket_path_;
+    std::string device_;
+    std::string event_socket_path_="/run/ttbox-mouse-passthrough/event.sock";
     int fd_=-1; int event_fd_=-1; std::atomic<bool> running_{false}; std::thread thread_; std::thread event_thread_;
-    std::atomic<uint16_t> buttons_{0}; std::atomic<int32_t> rel_x_{0},rel_y_{0};
+    std::atomic<uint16_t> buttons_{0};
+ std::atomic<int32_t> rel_x_{0},rel_y_{0};
 };
 }
